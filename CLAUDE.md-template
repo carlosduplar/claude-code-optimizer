@@ -1,0 +1,370 @@
+# CLAUDE.md Optimization Template
+
+Copy this file to your project root as `CLAUDE.md` to enable token-optimized workflows.
+
+---
+
+# Claude Code Optimization Guide
+
+## Cost-First Defaults
+
+- **Default model**: sonnet 4.6 (or haiku for quick tasks)
+- **Always use offset/limit** for reads >500 lines
+- **Pre-convert**: PDF→text, Office→Markdown, images→2000x2000 max
+- **Compact at**: 150K tokens
+- **Turn limits**: +500k default, +1m for complex tasks
+
+---
+
+## Token Budgets
+
+Set token budgets by starting messages with:
+- `+500k` - Limit to 500,000 tokens this turn
+- `+1m` - Limit to 1,000,000 tokens this turn
+- `use 500k tokens` - Verbose format
+
+**Example**:
+```
++500k Review this PR and suggest improvements. Focus on security and performance.
+```
+
+---
+
+## File Reading Guidelines
+
+### Always Use Pagination
+
+For files >500 lines, always specify offset and limit:
+
+```
+# Good
+Read file.ts {"offset": 1, "limit": 100}
+Read file.ts {"offset": 101, "limit": 100}
+
+# Bad (expensive)
+Read file.ts
+```
+
+### Search Before Reading
+
+```
+# Good - targeted search
+Grep "function handleRequest" *.ts
+
+# Bad - reading everything
+Read all files then search
+```
+
+### Binary File Handling
+
+**Never read binary files directly.** Pre-convert:
+
+| Type | Command | Notes |
+|------|---------|-------|
+| PDFs | `pdftotext -layout` or `markitdown` | >10 pages = reference only |
+| DOCX | `markitdown` | Convert to Markdown |
+| XLSX | `markitdown` | Convert to Markdown table |
+| PPTX | `markitdown` | Convert to text outline |
+| Images | `magick -resize 2000x2000>` | Auto-resized anyway |
+
+---
+
+## Context Management
+
+### Auto-Compact Settings
+
+Add to `~/.claude.json` or `.claude.json`:
+
+```json
+{
+  "autoCompactEnabled": true
+}
+```
+
+### Manual Compact Triggers
+
+**Always run `/compact` before:**
+- Large refactoring tasks
+- Multi-file operations across >10 files
+- Sessions exceeding 150K tokens
+- Complex architectural changes
+
+### Never Use /clear
+
+`/clear` destroys cached context. Prefer `/compact` which preserves recent context.
+
+---
+
+## Model Selection Strategy
+
+### Cost Hierarchy
+
+| Model | Input | Output | Use For |
+|-------|-------|--------|---------|
+| Haiku 3.5 | $0.80 | $4 | Quick tasks, searches, counts |
+| Sonnet 4.x | $3 | $15 | General development (default) |
+| Opus 4.5 | $5 | $25 | Complex architecture, reviews |
+| Opus 4.6 | $5 | $25 | Frontier capabilities |
+| Opus 4.6 Fast | $30 | $150 | Emergency priority only |
+
+### Model Switching Rules
+
+1. **Batch by model** - Don't switch mid-task
+2. **Start with Haiku** for exploration
+3. **Upgrade to Opus** only when needed
+4. **Never use Fast Mode** for routine work (6x cost)
+
+---
+
+## Tool Usage Optimization
+
+### Avoid Parallel Tool Abuse
+
+The system enforces **200K chars aggregate** per message for parallel tools.
+
+**Bad**:
+```
+# 10 parallel file reads, each 30K chars = 300K total
+# Results persisted to disk (slow)
+```
+
+**Good**:
+```
+# Sequential with pagination
+Read file1.ts {"limit": 50}
+Read file2.ts {"limit": 50}
+```
+
+### Cache-Friendly Practices
+
+Prompt cache hits require identical:
+1. System prompt
+2. Tools
+3. Model
+4. Messages prefix
+5. **Thinking config** (changing breaks cache!)
+
+**Best practices**:
+- Keep system prompt stable
+- Don't change thinking settings mid-session
+- Batch work by model
+
+---
+
+## Hooks Configuration
+
+Add to your `CLAUDE.md` or `settings.json`:
+
+### Auto-Resize Images
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Read",
+      "hooks": [{
+        "type": "command",
+        "command": "if command -v magick >/dev/null 2>&1 && [ -f \"$ARGUMENTS\" ] && [[ \"$ARGUMENTS\" =~ \\.(png|jpg|jpeg)$ ]]; then magick \"$ARGUMENTS\" -resize 2000x2000\\> -quality 85 /tmp/resized_$(basename \"$ARGUMENTS\"); fi",
+        "if": "Read(*.{png,jpg,jpeg})"
+      }]
+    }]
+  }
+}
+```
+
+### Document Conversion
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Read",
+      "hooks": [{
+        "type": "command",
+        "command": "if command -v markitdown >/dev/null 2>&1 && [ -f \"$ARGUMENTS\" ] && [[ \"$ARGUMENTS\" =~ \\.(pdf|docx|xlsx)$ ]]; then markitdown \"$ARGUMENTS\" > \"${ARGUMENTS%.*}.md\" 2>/dev/null; fi",
+        "if": "Read(*.{pdf,docx,xlsx})"
+      }]
+    }]
+  }
+}
+```
+
+### Large File Warning
+
+```json
+{
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Read",
+      "hooks": [{
+        "type": "command",
+        "command": "if [ -f \"$ARGUMENTS\" ] && [ $(stat -f%z \"$ARGUMENTS\" 2>/dev/null || stat -c%s \"$ARGUMENTS\" 2>/dev/null) -gt 50000 ]; then echo \"WARNING: Large file. Use offset/limit.\"; fi",
+        "if": "Read(*.*)"
+      }]
+    }]
+  }
+}
+```
+
+---
+
+## Image Handling
+
+### Pre-Attach Optimization
+
+Before attaching screenshots or images:
+
+```bash
+# Resize to max dimensions
+magick input.png -resize 2000x2000\> output.png
+
+# Compress JPEG
+magick input.jpg -resize 2000x2000\> -quality 85 output.jpg
+
+# Convert format if needed
+magick input.bmp -resize 2000x2000\> output.png
+```
+
+### Format Guidelines
+
+| Content | Format | Quality |
+|---------|--------|---------|
+| Text/UI | PNG | Lossless |
+| Photos | JPEG | 85% |
+| Diagrams | PNG | Lossless |
+| Screenshots | PNG | Default |
+
+---
+
+## PDF Handling
+
+### Size Guidelines
+
+| Size | Behavior |
+|------|----------|
+| < 3MB | Inlined as document |
+| 3-20MB | Extracted to page images |
+| > 20MB | Reference only |
+| > 100 pages | Reference only |
+
+### Partial Reading
+
+```
+# Read specific pages
+Read document.pdf {"pages": "1-10"}
+Read document.pdf {"pages": "15,20,25"}
+```
+
+### Pre-Conversion
+
+```bash
+# Convert to text
+pdftotext -layout document.pdf document.txt
+
+# Or to Markdown
+markitdown document.pdf > document.md
+```
+
+---
+
+## MCP Server Management
+
+### Disable Unused Servers
+
+Each MCP server adds to system prompt size:
+
+```
+# List active
+/mcp list
+
+# Disable unused
+/mcp disable <server-name>
+```
+
+### Official vs Custom
+
+- **Official registry MCPs**: Tool names logged (not PII)
+- **Custom/local MCPs**: Tool names redacted to `mcp_tool`
+
+---
+
+## Rate Limit Management
+
+### Monitor Headers
+
+The API sends these headers (tracked automatically):
+- `anthropic-ratelimit-unified-5h-*` - 5-hour session limits
+- `anthropic-ratelimit-unified-7d-*` - 7-day weekly limits
+- `anthropic-ratelimit-unified-overage-*` - Extra usage status
+
+### Early Warnings
+
+- **5-hour**: Warning at 90% utilization
+- **7-day**: Tiered warnings at 25%, 50%, 75%
+
+### Overage
+
+When main limit hits, overage quota activates (if enabled in account settings).
+
+---
+
+## Summary Checklist
+
+### Before Starting Work
+
+- [ ] Set appropriate model (Haiku/Sonnet/Opus)
+- [ ] Enable auto-compact in settings
+- [ ] Verify MCP servers (disable unused)
+- [ ] Pre-convert any binary documents
+
+### During Session
+
+- [ ] Use offset/limit for file reads
+- [ ] Set token budgets (+500k) for large tasks
+- [ ] Run `/compact` at 150K tokens
+- [ ] Avoid model switching
+
+### For Large Projects
+
+- [ ] Use plan mode (`/plan`) for complex tasks
+- [ ] Batch operations by file type
+- [ ] Pre-resize images before attaching
+- [ ] Convert PDFs to text when possible
+
+---
+
+## Emergency Controls
+
+### Hard Token Limits
+
+```bash
+# Set absolute limit (blocks if exceeded)
+export CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE=180000
+```
+
+### Disable Expensive Features
+
+```bash
+# Disable advisor tool
+export CLAUDE_CODE_DISABLE_ADVISOR_TOOL=1
+
+# Disable attachments
+export CLAUDE_CODE_DISABLE_ATTACHMENTS=1
+
+# Disable background tasks
+export CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1
+```
+
+### Privacy Mode
+
+```bash
+# Disable all telemetry
+export DISABLE_TELEMETRY=1
+
+# Disable nonessential traffic
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+```
+
+---
+
+*Last updated: Based on Claude Code source analysis*
