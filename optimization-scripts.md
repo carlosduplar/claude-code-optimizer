@@ -117,21 +117,28 @@ Both scripts enable `autoCompactEnabled` in Claude's settings:
 
 ### 4. CLAUDE.md Template
 
-Creates a project-level `CLAUDE.md` with:
+Creates a user-level `CLAUDE.md` at `~/.claude/CLAUDE.md` (Linux/macOS) or `%USERPROFILE%\.claude\CLAUDE.md` (Windows) with:
 
-- Cost-first defaults (model selection, pagination rules)
+- Cost-first defaults (pagination rules, pre-conversion)
 - Token budget syntax (`+500k`, `+1m`)
 - File reading guidelines (offset/limit)
 - Binary file handling (pre-conversion commands)
 - Context management rules
-- Emergency controls
+- Prompt cache keepalive (automatic via hooks)
 
-### 5. Windows Helper Scripts (PowerShell only)
+### 5. Helper Scripts (Optional)
 
-The PowerShell script additionally creates:
+Both scripts create optional helper scripts for manual use:
 
+**Windows (PowerShell):**
 - `preprocess-for-claude.ps1` - Document conversion helper
 - `preprocess-for-claude.bat` - Batch wrapper for easy use
+- `claude-keepalive.ps1` - Manual cache keepalive (hooks handle this automatically)
+
+**Linux/macOS (Bash):**
+- `claude-keepalive.sh` - Manual cache keepalive via tmux (hooks handle this automatically)
+
+> **Note:** These helper scripts are optional. The `settings.json` hooks automatically handle image pre-processing and cache keepalive. The scripts are provided for manual use or edge cases.
 
 ---
 
@@ -227,12 +234,12 @@ Look for:
 
 ## Pre-Processing Tools Usage
 
-After installation, use these workflows:
+The `settings.json` hooks automatically handle image resizing and cache keepalive. Manual pre-processing is only needed for edge cases or non-standard workflows.
 
 ### Documents (PDF, DOCX, XLSX, PPTX)
 
 ```bash
-# Convert before reading in Claude
+# Convert before reading in Claude (optional - hooks don't handle documents)
 markitdown document.pdf > document.md
 markitdown spreadsheet.xlsx > spreadsheet.md
 markitdown presentation.pptx > presentation.md
@@ -241,14 +248,16 @@ markitdown presentation.pptx > presentation.md
 Read document.md  # 10x cheaper than reading the binary
 ```
 
-### Images
+### Images (Automatic via Hooks)
+
+Images are automatically resized by the PreToolUse hook when using the `Read` tool:
+- PNG/JPG/JPEG files are resized to max 2000x2000
+- Quality set to 85%
+- Saves ~33% on base64 encoding overhead
 
 ```bash
-# Resize before attaching
+# Manual resize (only if needed for edge cases)
 magick screenshot.png -resize 2000x2000> -quality 85 optimized.png
-
-# Or use the Windows helper
-.\preprocess-for-claude.ps1 -Path screenshot.png
 ```
 
 ### PDFs (Alternative)
@@ -303,7 +312,7 @@ Invoke-Expression ((New-Object System.Net.WebClient).DownloadString('https://cho
 
 **Linux/macOS:**
 ```bash
-# Source your profile
+# The script auto-sources your profile, but if needed:
 source ~/.bashrc  # or ~/.zshrc
 
 # Verify
@@ -327,13 +336,18 @@ Claude Code reads environment variables at startup. **You must restart Claude Co
 
 | File | Platform | Purpose |
 |------|----------|---------|
-| `CLAUDE.md` | All | Project-level optimization guide |
+| `~/.claude/CLAUDE.md` | Linux/macOS | User-level optimization guide |
+| `%USERPROFILE%\.claude\CLAUDE.md` | Windows | User-level optimization guide |
 | `~/.claude/.claude.json` | Linux/macOS | Claude settings (auto-compact) |
 | `%USERPROFILE%\.claude\.claude.json` | Windows | Claude settings (auto-compact) |
+| `~/.claude/settings.json` | Linux/macOS | Hooks for auto-processing & keepalive |
+| `.claude/settings.json` | Windows (project) | Hooks for auto-processing & keepalive |
 | `~/.bashrc` / `~/.zshrc` modifications | Linux/macOS | Environment variables |
 | Windows Registry | Windows | System environment variables |
-| `preprocess-for-claude.ps1` | Windows | Document conversion helper |
-| `preprocess-for-claude.bat` | Windows | Batch wrapper |
+| `claude-keepalive.sh` | Linux/macOS | Optional manual keepalive script |
+| `claude-keepalive.ps1` | Windows | Optional manual keepalive script |
+| `preprocess-for-claude.ps1` | Windows | Optional document conversion helper |
+| `preprocess-for-claude.bat` | Windows | Optional batch wrapper |
 
 ---
 
