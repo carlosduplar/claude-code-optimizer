@@ -639,117 +639,6 @@ function Create-NewClaudeConfig {
     Write-Success "Created Claude config with autoCompactEnabled"
 }
 
-# Create CLAUDE.md template
-function New-ClaudeMdTemplate {
-    Write-Header "Creating CLAUDE.md Template"
-
-    # Target user-level .claude directory
-    $claudeDir = Join-Path $env:USERPROFILE ".claude"
-    $claudeMd = Join-Path $claudeDir "CLAUDE.md"
-
-    if (Test-Path $claudeMd) {
-        Write-Warning "CLAUDE.md already exists at $claudeMd"
-        $overwrite = Read-Host "Overwrite? (y/N)"
-        if ($overwrite -notmatch '^[Yy]$') {
-            return
-        }
-    }
-
-    if ($DryRun) {
-        Write-Host "[DRY-RUN] Would create CLAUDE.md at $claudeMd"
-        return
-    }
-
-    # Ensure .claude directory exists
-    if (-not (Test-Path $claudeDir)) {
-        New-Item -ItemType Directory -Path $claudeDir -Force | Out-Null
-    }
-
-    $content = @'
-# Claude Code Optimization Guide
-
-## Cost-First Defaults
-- **Default model**: sonnet 4.6 (or haiku for quick tasks)
-- **Always use offset/limit** for reads >500 lines
-- **Pre-convert**: PDF→text, Office→Markdown, images→2000x2000 max
-- **Compact at**: 150K tokens
-- **Turn limits**: +500k default, +1m for complex tasks
-
-## Token Budgets
-Set token budgets by starting messages with:
-- `+500k` - Limit to 500,000 tokens this turn
-- `+1m` - Limit to 1,000,000 tokens this turn
-
-## File Reading Guidelines
-### Always Use Pagination
-For files >500 lines, always specify offset and limit:
-```
-Read file.ts {"offset": 1, "limit": 100}
-```
-
-### Search Before Reading
-```
-# Good - targeted search
-Grep "function handleRequest" *.ts
-
-# Bad - reading everything
-Read all files then search
-```
-
-### Binary File Handling
-Pre-convert binary files before reading:
-- PDFs: Use pdftotext.exe or markitdown
-- DOCX/XLSX/PPTX: markitdown
-- Images: magick.exe -resize 2000x2000
-
-## Context Management
-- **Enable auto-compact** in settings (already configured)
-- **Run `/compact` at 150K tokens**
-- **Never use `/clear`** (destroys cached context)
-
-## Prompt Cache Keepalive
-The Anthropic API has a **5-minute TTL** on prompt cache entries. After 5 minutes of inactivity:
-- Cache is evicted (10x cost increase!)
-- 200K context goes from $0.60 to $6.00 per request
-
-The keepalive hook is automatically configured in `.claude/settings.json` to keep the cache warm.
-
-## PowerShell Pre-Processing Commands
-
-### Convert Documents
-```powershell
-# PDF to text
-pdftotext.exe -layout document.pdf document.txt
-
-# Office to Markdown
-markitdown document.docx > document.md
-markitdown spreadsheet.xlsx > spreadsheet.md
-```
-
-### Resize Images
-```powershell
-magick.exe input.png -resize 2000x2000 -quality 85 output.png
-magick.exe input.jpg -resize 2000x2000 -quality 85 output.jpg
-```
-
-## Daily Checklist
-- [ ] Set appropriate model for the task
-- [ ] Use offset/limit for file reads
-- [ ] Set token budgets (+500k) for large tasks
-- [ ] Run `/compact` at 150K tokens
-- [ ] Pre-convert binary documents
-
-## Windows-Specific Tips
-- Use PowerShell or WSL for markitdown
-- ImageMagick command is `magick.exe` on Windows
-- pdftotext comes with poppler (choco install poppler)
-'@
-
-    $content | Set-Content $claudeMd -Encoding UTF8
-
-    Write-Success "Created CLAUDE.md at $claudeMd"
-}
-
 # Create a batch file for easy pre-processing (optional - hooks handle this automatically)
 function New-PreprocessScript {
     Write-Header "Creating Pre-Processing Helper Scripts (Optional)"
@@ -1106,7 +995,6 @@ function Main {
     Set-PrivacyConfiguration
     Set-WindowsEnvironment
     Set-ClaudeConfiguration
-    New-ClaudeMdTemplate
     New-PreprocessScript
     New-KeepaliveScript
     New-SettingsJson

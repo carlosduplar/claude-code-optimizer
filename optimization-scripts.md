@@ -115,18 +115,7 @@ Both scripts enable `autoCompactEnabled` in Claude's settings:
 - Prevents expensive blocking rate limits
 - Preserves recent context (unlike `/clear`)
 
-### 4. CLAUDE.md Template
-
-Creates a user-level `CLAUDE.md` at `~/.claude/CLAUDE.md` (Linux/macOS) or `%USERPROFILE%\.claude\CLAUDE.md` (Windows) with:
-
-- Cost-first defaults (pagination rules, pre-conversion)
-- Token budget syntax (`+500k`, `+1m`)
-- File reading guidelines (offset/limit)
-- Binary file handling (pre-conversion commands)
-- Context management rules
-- Prompt cache keepalive (automatic via hooks)
-
-### 5. Helper Scripts (Optional)
+### 4. Helper Scripts (Optional)
 
 Both scripts create optional helper scripts for manual use:
 
@@ -336,8 +325,6 @@ Claude Code reads environment variables at startup. **You must restart Claude Co
 
 | File | Platform | Purpose |
 |------|----------|---------|
-| `~/.claude/CLAUDE.md` | Linux/macOS | User-level optimization guide |
-| `%USERPROFILE%\.claude\CLAUDE.md` | Windows | User-level optimization guide |
 | `~/.claude/.claude.json` | Linux/macOS | Claude settings (auto-compact) |
 | `%USERPROFILE%\.claude\.claude.json` | Windows | Claude settings (auto-compact) |
 | `~/.claude/settings.json` | Linux/macOS | Hooks for auto-processing & keepalive |
@@ -365,7 +352,6 @@ Claude Code reads environment variables at startup. **You must restart Claude Co
 - [`prompt-caching.md`](prompt-caching.md) - 5-minute TTL behavior, keepalive strategies, cache optimization
 - [`telemetry-privacy.md`](telemetry-privacy.md) - Detailed telemetry and privacy internals
 - [`undocumented-features.md`](undocumented-features.md) - Environment variables and feature flags
-- [`CLAUDE.md-template`](CLAUDE.md-template) - Ready-to-use project template
 
 ---
 

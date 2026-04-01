@@ -77,7 +77,6 @@ This script will:
   2. Install missing dependencies (with your permission)
   3. Configure MAXIMUM privacy environment variables by default
   4. Enable auto-compact in Claude settings
-  5. Create CLAUDE.md template with optimization guidelines
 
 EOF
 }
@@ -510,91 +509,6 @@ JSONEOF
     fi
 }
 
-# Create CLAUDE.md template
-create_claude_md() {
-    print_header "Creating CLAUDE.md Template"
-
-    # Target user-level .claude directory
-    local CLAUDE_DIR="${HOME}/.claude"
-    local CLAUDE_MD="${CLAUDE_DIR}/CLAUDE.md"
-
-    if [[ -f "$CLAUDE_MD" ]]; then
-        print_warning "CLAUDE.md already exists at $CLAUDE_MD"
-        read -p "Overwrite? (y/N) " -n 1 -r
-        echo ""
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            return 0
-        fi
-    fi
-
-    if $DRY_RUN; then
-        echo "[DRY-RUN] Would create CLAUDE.md at $CLAUDE_MD"
-        return 0
-    fi
-
-    # Ensure .claude directory exists
-    mkdir -p "$CLAUDE_DIR"
-
-    cat > "$CLAUDE_MD" << 'EOF'
-# Claude Code Optimization Guide
-
-## Cost-First Defaults
-- **Default model**: sonnet 4.6 (or haiku for quick tasks)
-- **Always use offset/limit** for reads >500 lines
-- **Pre-convert**: PDF→text, Office→Markdown, images→2000x2000 max
-- **Compact at**: 150K tokens
-- **Turn limits**: +500k default, +1m for complex tasks
-
-## Token Budgets
-Set token budgets by starting messages with:
-- `+500k` - Limit to 500,000 tokens this turn
-- `+1m` - Limit to 1,000,000 tokens this turn
-
-## File Reading Guidelines
-### Always Use Pagination
-For files >500 lines, always specify offset and limit:
-```
-Read file.ts {"offset": 1, "limit": 100}
-```
-
-### Search Before Reading
-```
-# Good - targeted search
-Grep "function handleRequest" *.ts
-
-# Bad - reading everything
-Read all files then search
-```
-
-### Binary File Handling
-Pre-convert binary files before reading:
-- PDFs: `pdftotext -layout` or `markitdown`
-- DOCX/XLSX/PPTX: `markitdown`
-- Images: `magick -resize 2000x2000>`
-
-## Context Management
-- **Enable auto-compact** in settings (already configured)
-- **Run `/compact` at 150K tokens**
-- **Never use `/clear`** (destroys cached context)
-
-## Prompt Cache Keepalive
-The Anthropic API has a **5-minute TTL** on prompt cache entries. After 5 minutes of inactivity:
-- Cache is evicted (10x cost increase!)
-- 200K context goes from $0.60 to $6.00 per request
-
-The keepalive hook is automatically configured in `.claude/settings.json` to keep the cache warm.
-
-## Daily Checklist
-- [ ] Set appropriate model for the task
-- [ ] Use offset/limit for file reads
-- [ ] Set token budgets (+500k) for large tasks
-- [ ] Run `/compact` at 150K tokens
-- [ ] Pre-convert binary documents
-EOF
-
-    print_success "Created CLAUDE.md at $CLAUDE_MD"
-}
-
 # Create keepalive script (optional - hooks handle this automatically)
 create_keepalive_script() {
     print_header "Creating Prompt Cache Keepalive Script (Optional)"
@@ -782,7 +696,6 @@ main() {
     check_and_install_deps
     configure_privacy
     configure_claude_settings
-    create_claude_md
     create_keepalive_script
     create_settings_json
 

@@ -10,7 +10,7 @@
 
 From source analysis (`src/services/api/claude.ts`, `src/utils/betas.ts`), prompt cache hits require **identical**:
 
-1. **System prompt** (including CLAUDE.md, auto-memory, MCP tool listings)
+1. **System prompt** (including auto-memory, MCP tool listings)
 2. **Tools** (definitions and schemas)
 3. **Model** (any change invalidates cache)
 4. **Messages prefix** (the conversation history up to the cache point)
@@ -24,7 +24,6 @@ From source analysis (`src/services/api/claude.ts`, `src/utils/betas.ts`), promp
 | Switching models (`/model`) | **Full invalidation** |
 | Changing thinking settings | **Full invalidation** |
 | Adding/removing MCP servers | **System prompt change** |
-| Editing CLAUDE.md | **System prompt change** |
 | Large tool result compaction | **Prefix change** (CACHED_MICROCOMPACT mitigates) |
 | 5+ minutes inactivity | **Possible TTL expiration** (community report) |
 
@@ -88,7 +87,7 @@ For a 200K context window, this is the difference between:
 
 ### Strategy 1: Hook-Based Keepalive (Recommended)
 
-Add to your `CLAUDE.md` or `settings.json`:
+Add to your `settings.json`:
 
 ```json
 {
@@ -212,10 +211,9 @@ Set thinking budget once at session start:
 ### 3. Stable System Prompt
 
 **Before starting work:**
-1. Finalize CLAUDE.md edits
-2. Configure MCP servers
-3. Load all skills
-4. Then begin the conversation
+1. Configure MCP servers
+2. Load all skills
+3. Then begin the conversation
 
 Any system prompt change = cache invalidation.
 
@@ -291,7 +289,7 @@ This warns you when approaching the 5-minute idle threshold.
 | **Stable thinking config** | Set once at session start | High |
 | **Keepalive ping** | Background script every 4min | Medium |
 | **Pre-warm cache** | Small request after breaks | Medium |
-| **Minimize system changes** | Finalize CLAUDE.md before starting | High |
+| **Minimize system changes** | Configure MCP servers before starting | High |
 | **Use `/loop`** | For long-running monitoring tasks | Low |
 
 ---
