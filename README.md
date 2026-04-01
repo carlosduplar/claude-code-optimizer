@@ -33,6 +33,10 @@ This repository documents **obscure, undocumented, and internal** aspects of Cla
 |----------|-------------|
 | [Optimization Scripts](optimization-scripts.md) | Automated setup scripts for token efficiency and privacy configuration |
 
+**Tested Environments:**
+- Windows: PowerShell 7.6.0
+- Linux/WSL: Ubuntu (WSL2)
+
 ---
 
 ## 🏗️ Repository Structure
