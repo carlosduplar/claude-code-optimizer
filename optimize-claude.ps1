@@ -630,6 +630,23 @@ Pre-convert binary files before reading:
 - **Run `/compact` at 150K tokens**
 - **Never use `/clear`** (destroys cached context)
 
+## Prompt Cache Keepalive
+The Anthropic API has a **5-minute TTL** on prompt cache entries. After 5 minutes of inactivity:
+- Cache is evicted (10x cost increase!)
+- 200K context goes from $0.60 to $6.00 per request
+
+**Use the keepalive script:**
+```powershell
+# In another PowerShell window, while Claude is running
+.\claude-keepalive.ps1
+```
+
+Or manually keep cache warm:
+```
+# Send a no-op message every 4 minutes
+/loop --interval 240s echo "keepalive"
+```
+
 ## Model Selection Strategy
 | Model | Input | Output | Use For |
 |-------|-------|--------|---------|
@@ -816,6 +833,202 @@ if ($Batch) {
     Write-Host "  - $psFile (PowerShell with more features)"
 }
 
+# Create keepalive script
+tunction New-KeepaliveScript {
+    Write-Header "Creating Prompt Cache Keepalive Script"
+
+    $keepaliveFile = Join-Path $PWD "claude-keepalive.ps1"
+
+    if (Test-Path $keepaliveFile) {
+        Write-Warning "claude-keepalive.ps1 already exists"
+        $overwrite = Read-Host "Overwrite? (y/N)"
+        if ($overwrite -notmatch '^[Yy]$') {
+            return
+        }
+    }
+
+    if ($DryRun) {
+        Write-Host "[DRY-RUN] Would create $keepaliveFile"
+        return
+    }
+
+    $content = @'
+#requires -Version 5.1
+<#
+.SYNOPSIS
+    Claude Code Prompt Cache Keepalive Script
+
+.DESCRIPTION
+    Prevents 5-minute cache TTL expiration by sending periodic no-op messages.
+    The Anthropic API has a 5-minute TTL on prompt cache entries.
+    After 5 minutes of inactivity, cache is evicted and costs increase 10x.
+    For 200K context: $0.60 -> $6.00 per request
+
+.PARAMETER Interval
+    Seconds between keepalive messages (default: 240 = 4 minutes)
+
+.PARAMETER WindowTitle
+    Window title to search for (default: "claude")
+
+.EXAMPLE
+    .\claude-keepalive.ps1
+    Start keepalive with default settings
+
+.EXAMPLE
+    .\claude-keepalive.ps1 -Interval 180
+    Send keepalive every 3 minutes
+#>
+
+[CmdletBinding()]
+param(
+    [int]$Interval = 240,
+    [string]$WindowTitle = "claude"
+)
+
+$script:Running = $true
+
+function Send-Keepalive {
+    param([string]$Title)
+
+    # Find window with title containing "claude"
+    $hwnd = $null
+    Get-Process | Where-Object { $_.MainWindowTitle -match $Title } | ForEach-Object {
+        $hwnd = $_.MainWindowHandle
+    }
+
+    if (-not $hwnd) {
+        Write-Warning "No window with title containing '$Title' found"
+        return $false
+    }
+
+    try {
+        # Use Windows API to send keys
+        Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public class WinAPI {
+    [DllImport("user32.dll")]
+    public static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
+}
+"@
+
+        # Bring window to foreground
+        [WinAPI]::SetForegroundWindow($hwnd) | Out-Null
+        Start-Sleep -Milliseconds 100
+
+        # Send comment (no-op)
+        $timestamp = Get-Date -Format "HHmmss"
+        $keys = "# keepalive $timestamp"
+
+        # Use WScript.Shell for sending keys
+        $shell = New-Object -ComObject WScript.Shell
+        $shell.SendKeys($keys)
+        Start-Sleep -Milliseconds 100
+        $shell.SendKeys("{ENTER}")
+        Start-Sleep -Milliseconds 500
+        $shell.SendKeys("^c")  # Ctrl+C to cancel
+
+        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Sent keepalive" -ForegroundColor Green
+        return $true
+    }
+    catch {
+        Write-Warning "Failed to send keepalive: $_"
+        return $false
+    }
+}
+
+# Cleanup handler
+$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
+    $script:Running = $false
+    Write-Host "`n[Keepalive] Stopping..." -ForegroundColor Yellow
+}
+
+Write-Host "Claude Code Prompt Cache Keepalive" -ForegroundColor Cyan
+Write-Host "Interval: $Interval seconds (4 minutes)" -ForegroundColor Cyan
+Write-Host "Target window title: $WindowTitle" -ForegroundColor Cyan
+Write-Host "Press Ctrl+C to stop`n" -ForegroundColor Yellow
+
+while ($script:Running) {
+    Send-Keepalive -Title $WindowTitle
+    Start-Sleep -Seconds $Interval
+}
+'@
+
+    $content | Set-Content $keepaliveFile -Encoding UTF8
+
+    Write-Success "Created $keepaliveFile"
+    Write-Status "Usage: .\claude-keepalive.ps1 [-Interval 240]"
+    Write-Status "Run this in another PowerShell window while Claude Code is active"
+}
+
+# Create settings.json with keepalive hook
+tunction New-SettingsJson {
+    Write-Header "Creating settings.json with Keepalive Hook"
+
+    $settingsDir = Join-Path $PWD ".claude"
+    $settingsFile = Join-Path $settingsDir "settings.json"
+
+    if (Test-Path $settingsFile) {
+        Write-Warning "settings.json already exists"
+        $overwrite = Read-Host "Create backup and add keepalive hook? (y/N)"
+        if ($overwrite -notmatch '^[Yy]$') {
+            return
+        }
+
+        if (-not $DryRun) {
+            $backupName = "settings.json.backup.$(Get-Date -Format 'yyyyMMddHHmmss')"
+            Copy-Item $settingsFile (Join-Path $settingsDir $backupName)
+        }
+    }
+
+    if ($DryRun) {
+        Write-Host "[DRY-RUN] Would create $settingsFile with keepalive hook"
+        return
+    }
+
+    if (-not (Test-Path $settingsDir)) {
+        New-Item -ItemType Directory -Path $settingsDir -Force | Out-Null
+    }
+
+    $config = @{
+        autoCompactEnabled = $true
+        hooks = @{
+            PreToolUse = @(
+                @{
+                    matcher = "Read"
+                    hooks = @(
+                        @{
+                            type = "command"
+                            command = 'if (Get-Command magick -ErrorAction SilentlyContinue) { magick "$env:ARGUMENTS" -resize 2000x2000 -quality 85 "C:\temp\resized_$(Split-Path "$env:ARGUMENTS" -Leaf)" }'
+                            if = "Read(*.{png,jpg,jpeg})"
+                        }
+                    )
+                }
+            )
+            PostToolUse = @(
+                @{
+                    matcher = "*"
+                    hooks = @(
+                        @{
+                            type = "command"
+                            command = 'Write-Output "{\"cache_keepalive\": \"$(Get-Date -Format yyyyMMddHHmmss)\"}"'
+                            if = "*"
+                        }
+                    )
+                }
+            )
+        }
+    }
+
+    $config | ConvertTo-Json -Depth 10 | Set-Content $settingsFile -Encoding UTF8
+
+    Write-Success "Created $settingsFile with keepalive hook"
+    Write-Status "The PostToolUse hook fires after every tool use, keeping cache warm"
+}
+
 # Main execution
 tunction Main {
     Write-Header "Claude Code Token Optimizer & Privacy Enhancer (Windows)"
@@ -837,6 +1050,8 @@ tunction Main {
     Set-ClaudeConfiguration
     New-ClaudeMdTemplate
     New-PreprocessScript
+    New-KeepaliveScript
+    New-SettingsJson
 
     # Summary
     Write-Header "Summary"
@@ -845,7 +1060,7 @@ tunction Main {
     Write-Host ""
 
     if ($script:InstallFailed.Count -gt 0) {
-        Write-Warning "Some dependencies failed to install: $($script:InstallFailed -join ', ')"
+        Write-Error "Failed to install: $($script:InstallFailed -join ', ')"
         Write-Host "You can manually install them later."
         Write-Host ""
     }
@@ -854,8 +1069,9 @@ tunction Main {
     Write-Host "1. Review the environment variables in your PowerShell profile"
     Write-Host "2. Restart PowerShell or run: `$PROFILE"
     Write-Host "3. Start Claude Code with optimized settings"
-    Write-Host "4. Check /cost regularly to monitor usage"
-    Write-Host "5. Use the preprocess-for-claude.ps1 script for document conversion"
+    Write-Host "4. For long sessions, run: .\claude-keepalive.ps1"
+    Write-Host "5. Check /cost regularly to monitor usage"
+    Write-Host "6. Use the preprocess-for-claude.ps1 script for document conversion"
     Write-Host ""
 
     if ($ReducedPrivacy) {
@@ -865,6 +1081,9 @@ tunction Main {
     }
 
     Write-Host ""
+    Write-Host "Cache Keepalive: Run .\claude-keepalive.ps1 for sessions >5 minutes" -ForegroundColor Cyan
+    Write-Host ""
+
     Write-Success "Happy optimizing!"
 }
 

@@ -1,224 +1,194 @@
-# Claude Code Documentation
+# Claude Code: Undocumented Internals
 
-This repository contains comprehensive technical documentation for Claude Code, Anthropic's official CLI for Claude. This documentation was reverse-engineered from the source code to provide deep insights into the system's architecture.
+This repository documents **obscure, undocumented, and internal** aspects of Claude Code that are not covered in the [official documentation](https://code.claude.com/docs/en/). Everything here was reverse-engineered from the source code.
 
-## 📚 Documentation Index
-
-### Getting Started
-
-| Document | Description |
-|----------|-------------|
-| [Custom API Providers](docs/custom-api-providers.md) | Using Claude Code with third-party API endpoints (Fireworks AI, etc.) |
-
-### Core Architecture
-
-| Document | Description |
-|----------|-------------|
-| [Query Flow & Message Streaming](docs/query-flow.md) | How messages flow from user input through API streaming, retry logic, fallbacks, and response processing |
-| [Session Memory & Context Management](docs/session-memory.md) | How Claude Code manages long conversations: compaction, memory extraction, checkpoints, and token budget management |
-| [Tool System Architecture](docs/tool-system.md) | The tool framework: registration, permissions, execution, MCP/LSP integration, and bash providers |
-| [Permission System & YOLO/Auto Mode](docs/permission-system.md) | Multi-layered permission system with AI-powered auto-mode classifier |
-| [Skill & Plugin System](docs/skill-plugin-system.md) | Skills (markdown workflows), plugins (full extensions), bundled skills, and MCP integration |
-
-### Internal Features
-
-| Document | Description |
-|----------|-------------|
-| [Undocumented Features](docs/undocumented-features.md) | 88+ feature flags, hidden CLI commands, 60+ environment variables |
-| [Anthropic-Only Commands](docs/ant-only-commands.md) | Commands gated behind `USER_TYPE=ant` and their implementations |
+> **Note:** For standard usage (CLI flags, environment variables, skills, MCP, etc.), see the [official docs](https://code.claude.com/docs/en/cli-reference). This repo focuses on internals not documented there.
 
 ---
 
-## 🏗️ Architecture Overview
+## 📚 Documentation Index
 
-### Repository Structure
+### Core Internals (Architecture Deep-Dives)
+
+| Document | Description | Why Not in Official Docs |
+|----------|-------------|--------------------------|
+| [Query Flow & Message Streaming](docs/query-flow.md) | Streaming fallback layers, retry logic with exponential backoff + jitter, 529 error handling, side query architecture | Internal implementation details |
+| [Session Memory & Context Management](docs/session-memory.md) | Proactive/reactive compaction, memdir taxonomy, CACHED_MICROCOMPACT, REACTIVE_COMPACT feature flags | Internal memory system |
+| [Tool System Architecture](docs/tool-system.md) | Tool registration pipeline, MCP/LSP integration internals, permission context flow | Implementation details |
+| [Permission System & Auto-Mode Classifier](docs/permission-system.md) | Two-stage XML classifier, iron gate fail-closed logic, denial tracking circuit breakers | Internal security mechanisms |
+| [Skill & Plugin System](docs/skill-plugin-system.md) | Bundled skills registry, dynamic skill discovery, workflow scripts, MCP skill builders | Internal extension architecture |
+| [Prompt Caching & Keepalive](docs/prompt-caching.md) | 5-minute TTL behavior, cache invalidation triggers, CACHED_MICROCOMPACT, keepalive strategies | API-level cache internals |
+
+### Hidden/Internal Features
+
+| Document | Description |
+|----------|-------------|
+| [Undocumented Features](docs/undocumented-features.md) | 88+ compile-time feature flags, hidden CLI flags, fast-path subcommands, 60+ internal environment variables |
+| [Anthropic-Only Commands](docs/ant-only-commands.md) | 24 commands gated behind `USER_TYPE=ant`—which work, which are stubs, side effects |
+| [Telemetry & Privacy Internals](docs/telemetry-privacy.md) | Datadog endpoints, 1P event logging schema, PII sanitization rules, proto column routing |
+
+### Practical Tools
+
+| Document | Description |
+|----------|-------------|
+| [Optimization Scripts](docs/optimization-scripts.md) | Automated setup scripts for token efficiency and privacy configuration |
+
+---
+
+## 🏗️ Repository Structure
 
 ```
 claude-code/
 ├── docs/                          # This documentation
-│   ├── custom-api-providers.md
-│   ├── query-flow.md
-│   ├── session-memory.md
-│   ├── tool-system.md
-│   ├── permission-system.md
-│   ├── skill-plugin-system.md
-│   ├── undocumented-features.md
-│   └── ant-only-commands.md
-└── src/                           # Source code (not included in this repo)
-```
-
-### Key Subsystems
-
-1. **Query Engine** (`src/QueryEngine.ts`, `src/services/api/claude.ts`)
-   - Message streaming with fallback to non-streaming
-   - Retry logic with exponential backoff + jitter
-   - Rate limit and error handling
-   - 10 default max retries, 3 consecutive 529 errors before fallback
-
-2. **Permission System** (`src/utils/permissions/`)
-   - Multiple modes: default, acceptEdits, plan, bypassPermissions, dontAsk, auto
-   - AI-powered auto-mode with two-stage XML classifier
-   - Safe tool allowlist, dangerous pattern detection
-   - Denial tracking with circuit breakers
-
-3. **Tool Framework** (`src/tools/`, `src/Tool.ts`)
-   - 40+ built-in tools (Bash, FileEdit, WebSearch, etc.)
-   - MCP (Model Context Protocol) integration
-   - LSP (Language Server Protocol) support
-   - Tool permission contexts and validation
-
-4. **Context Management** (`src/services/compact/`, `src/memdir/`)
-   - Proactive compaction (token thresholds)
-   - Reactive compaction (API 413 handling)
-   - Session memory extraction (background summarization)
-   - Micro-compaction (tool result management)
-   - File checkpoints for rollback
-
-5. **Skill System** (`src/skills/`, `src/tools/SkillTool/`)
-   - SKILL.md format with YAML frontmatter
-   - Inline and forked execution modes
-   - Bundled skills (verify, debug, skillify, etc.)
-   - Dynamic skill discovery from `.claude/skills/`
-
-6. **Plugin System** (`src/plugins/`, `src/utils/plugins/`)
-   - Full-featured extensions with hooks, MCP/LSP servers
-   - Plugin manifest (plugin.json) schema
-   - Namespaced commands: `plugin-name:command-name`
-
----
-
-## 🔧 Environment Variables
-
-### Critical for Custom Providers
-
-```bash
-# Authentication - use API_KEY not AUTH_TOKEN for custom endpoints
-ANTHROPIC_API_KEY=fw_...                    # For x-api-key header
-ANTHROPIC_BASE_URL=https://api.fireworks.ai/inference
-
-# Model selection
-ANTHROPIC_MODEL=accounts/fireworks/models/kimi-k2p5
-ANTHROPIC_SMALL_FAST_MODEL=accounts/fireworks/models/kimi-k2p5
-```
-
-### Feature Control
-
-```bash
-CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1    # Strip beta headers
-CLAUDE_CODE_DUMP_AUTO_MODE=1               # Log classifier I/O
-CLAUDE_CODE_AUTO_MODE_MODEL=sonnet          # Override classifier model
-```
-
-### See Also
-
-- [Full environment variable list](docs/undocumented-features.md#undocumented-environment-variables) (60+ variables)
-
----
-
-## 🛡️ Security Features
-
-### Permission System
-
-- **Safe tool allowlist**: Read operations bypass classifier
-- **Dangerous pattern detection**: Strips `Bash(*)`, `Agent(*)`, etc.
-- **Iron gate (fail-closed)**: Classifier unavailable → deny with retry guidance
-- **Denial limits**: 3 consecutive / 20 total denials before fallback to prompting
-
-### Path Validation
-
-- Symlink traversal protection for team memory
-- Path normalization and escape detection
-- `.git/` and `.claude/` safety checks
-
-### Anti-Distillation
-
-- Fake tool injection (`ANTI_DISTILLATION_CC`)
-- Connector text summarization with signature verification
-
----
-
-## 🎯 Feature Flags
-
-Claude Code uses 88+ compile-time feature flags via `feature()` from `bun:bundle`:
-
-### Notable Flags
-
-| Flag | Description |
-|------|-------------|
-| `TRANSCRIPT_CLASSIFIER` | Auto-mode permission classification |
-| `KAIROS` | Multi-agent assistant system |
-| `PROACTIVE` | Agent acts without user prompts |
-| `BRIDGE_MODE` | Remote control over WebSocket |
-| `WORKFLOW_SCRIPTS` | Workflow-backed skills |
-| `CHICAGO_MCP` | Computer-use MCP (screen/keyboard) |
-| `MCP_SKILLS` | MCP server skill fetching |
-| `CACHED_MICROCOMPACT` | API cache editing for compaction |
-| `REACTIVE_COMPACT` | 413-triggered compaction |
-
----
-
-## 📊 Configuration
-
-### Skill Directories
-
-```
-~/.claude/skills/                  # Personal skills
-.claude/skills/                    # Project skills (up tree to home)
-managed/.claude/skills/            # Policy skills (unless disabled)
-.claude/commands/                  # Legacy commands
-```
-
-### Session Storage
-
-```
-~/.claude/history.jsonl            # Command history (100 items)
-~/.claude/projects/{cwd}/{sessionId}.jsonl   # Session transcript
-~/.claude/projects/{cwd}/{sessionId}/session-memory/summary.md   # Session memory
-~/.claude/projects/{cwd}/memory/   # Auto-memory / memdir
+│   ├── query-flow.md              # API streaming internals
+│   ├── session-memory.md          # Memory & compaction
+│   ├── tool-system.md             # Tool framework internals
+│   ├── permission-system.md       # Auto-mode classifier
+│   ├── skill-plugin-system.md     # Skills & plugins
+│   ├── prompt-caching.md          # Cache TTL & keepalive strategies
+│   ├── undocumented-features.md   # Feature flags & hidden commands
+│   ├── ant-only-commands.md       # Internal commands
+│   ├── telemetry-privacy.md       # Telemetry internals
+│   └── optimization-scripts.md     # Setup automation
+└── src/                           # Source code (not included)
 ```
 
 ---
 
-## 🔍 Key Implementation Details
+## 🔍 Key Undocumented Patterns
 
-### Retry Logic
+### Feature Flags (Compile-Time)
 
-```typescript
-// Exponential backoff + jitter
-const baseDelay = Math.min(500 * Math.pow(2, attempt - 1), 32000)
-const jitter = Math.random() * 0.25 * baseDelay
-return baseDelay + jitter
-```
+Claude Code uses 88+ build-time flags via `feature()` from `bun:bundle`:
 
-### Streaming Fallback
+| Flag | Purpose | File Ref |
+|------|---------|----------|
+| `TRANSCRIPT_CLASSIFIER` | Auto-mode permission classification | `src/utils/permissions/yoloClassifier.ts` |
+| `KAIROS` | Multi-agent assistant system | `src/services/kairos/` |
+| `PROACTIVE` | Agent acts without user prompts | `src/hooks/proactive.ts` |
+| `BRIDGE_MODE` | Remote control over WebSocket | `src/services/bridge/` |
+| `CACHED_MICROCOMPACT` | API cache editing for compaction | `src/services/compact/microCompact.ts` |
+| `REACTIVE_COMPACT` | 413-triggered compaction | `src/services/compact/autoCompact.ts` |
+| `CHICAGO_MCP` | Computer-use MCP (screen/keyboard) | `src/services/mcp/` |
+| `WORKFLOW_SCRIPTS` | Workflow-backed skills | `src/tools/WorkflowTool/` |
+| `PROMPT_CACHE_BREAK_DETECTION` | Detect prompt cache breaks | `src/services/api/promptCacheBreakDetection.ts` |
 
-1. Streaming request → timeout/error
-2. Fallback to non-streaming (64k token cap)
-3. If still failing → model fallback (e.g., Opus → Sonnet)
+### Prompt Cache TTL & Keepalive
 
-### Permission Mode Cycling
+Anthropic's API has a **5-minute TTL** on prompt cache entries. After 5 minutes of inactivity:
+- Cache is evicted
+- Subsequent requests pay full price (no ~90% discount)
+- For 200K context: **$6.00 vs $0.60 per request**
 
-Shift+Tab cycles: `default` → `acceptEdits` → `plan` → `bypassPermissions` → `auto`
+**Keepalive strategies:**
+1. **Hook-based:** PostToolUse hook that fires every 4 minutes
+2. **Background ping:** tmux script sending no-op messages
+3. **`/loop` command:** Built-in for active tasks
+4. **Pre-flight warmup:** Small request after breaks
+
+See [prompt-caching.md](docs/prompt-caching.md) for implementation details.
+
+### Hidden CLI Subcommands
+
+Fast-path commands handled before Commander parsing:
+
+| Subcommand | Aliases | Purpose |
+|------------|---------|---------|
+| `remote-control` | `rc`, `remote`, `sync` | Remote session control |
+| `daemon` | — | Long-running daemon mode |
+| `ps` | — | List background sessions |
+| `logs` | — | View session logs |
+| `attach` | — | Attach to running session |
+| `kill` | — | Kill a session |
+| `environment-runner` | — | CI environment runner |
+| `self-hosted-runner` | — | CI self-hosted runner |
+| `ssh` | — | SSH remote sessions |
+
+### Internal Environment Variables
+
+Notable undocumented variables:
+
+| Variable | Purpose |
+|----------|---------|
+| `CLAUDE_CODE_DUMP_AUTO_MODE` | Log classifier I/O to console |
+| `CLAUDE_CODE_TWO_STAGE_CLASSIFIER` | Enable XML classifier (fast/thinking modes) |
+| `CLAUDE_CODE_JSONL_TRANSCRIPT` | Use JSONL format for classifier |
+| `CLAUDE_INTERNAL_FC_OVERRIDES` | GrowthBook feature flag overrides (ant-only) |
+| `CLAUDE_CODE_ABLATION_BASELINE` | Disable thinking, compaction, memory for experiments |
+| `ENABLE_PID_BASED_VERSION_LOCKING` | PID-based update locking |
+| `CLAUDE_CODE_COWORKER_TYPE` | Coworker type for telemetry |
+
+See [undocumented-features.md](docs/undocumented-features.md) for the full list.
+
+---
+
+## 🛡️ Security Internals
+
+### Permission Decision Pipeline
+
+From `src/utils/permissions/permissions.ts:1158-1319`:
+
+1. **Deny rules** - Tool entirely denied
+2. **Ask rules** - Tool requires explicit permission
+3. **Tool.checkPermissions()** - Tool-specific validation
+4. **User interaction required** - Tool needs interactive input
+5. **Content-specific ask rules** - Pattern-based rules
+6. **Safety checks** - Sensitive path checks (.git/, .claude/)
+7. **Bypass permissions mode** - Skip remaining checks
+8. **Always allow rules** - Tool pre-approved
+9. **Auto mode classifier** - AI evaluation (two-stage XML)
+10. **Passthrough → Ask** - Default to prompting
+
+### Two-Stage XML Classifier
+
+From `src/utils/permissions/yoloClassifier.ts`:
+
+| Stage | Max Tokens | Output |
+|-------|------------|--------|
+| Stage 1 (Fast) | 64 | `<block>yes/no</block>` |
+| Stage 2 (Thinking) | 4096 | `<thinking>...</thinking><block>yes/no</block><reason>...</reason>` |
+
+### Iron Gate (Fail-Closed)
+
+When classifier is unavailable:
+- Check `tengu_iron_gate_closed` GrowthBook flag (default: true)
+- If true: deny with retry guidance
+- If false: fall through to prompting
+
+---
+
+## 📊 Telemetry Internals
+
+### Data Collection Streams
+
+| Stream | Endpoint | Data |
+|----------|----------|------|
+| 1P Event Logging | `/api/event_logging/batch` | Session, model, tool usage (sanitized), process metrics |
+| Datadog | `http-intake.logs.us5.datadoghq.com` | API errors, tool usage, compaction events |
+| OpenTelemetry | OTLP endpoint | Traces with user/session/org IDs |
+
+### MCP Tool Name Sanitization
+
+MCP tool names are redacted to `mcp_tool` unless:
+- Built-in MCP servers (computer-use)
+- claude.ai-proxied connectors
+- Official MCP registry URLs
+
+Custom/user-configured servers are redacted (PII-medium per taxonomy).
 
 ---
 
 ## 📝 Contributing
 
-This documentation is derived from source code analysis of Claude Code. To contribute:
+This documentation is derived from source code analysis. To contribute:
 
-1. Create a new branch from `main`
-2. Add or edit documentation in `docs/`
-3. Update this README with new entries
-4. Submit a PR to `carlosduplar/claude-code-fork`
+1. Focus on **undocumented** internals not in [official docs](https://code.claude.com/docs/en/)
+2. Include specific file paths and line numbers
+3. Cite source code references
+4. Submit PRs to `carlosduplar/claude-code-fork`
 
 ---
 
 ## 📄 License
 
 This documentation is provided as-is for educational and research purposes. The underlying Claude Code software is proprietary to Anthropic.
-
----
-
-## 🙏 Acknowledgments
-
-Documentation compiled through reverse engineering of the Claude Code source tree. Special thanks to the Claude Code engineering team for building such a sophisticated system.

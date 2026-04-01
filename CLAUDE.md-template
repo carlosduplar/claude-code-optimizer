@@ -148,6 +148,9 @@ Prompt cache hits require identical:
 - Keep system prompt stable
 - Don't change thinking settings mid-session
 - Batch work by model
+- **Avoid 5-minute idle periods** (cache TTL expires)
+
+See [`prompt-caching.md`](prompt-caching.md) for keepalive strategies.
 
 ---
 

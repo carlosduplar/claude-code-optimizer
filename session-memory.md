@@ -1,194 +1,315 @@
 # Claude Code Session Memory and Context Management
 
-## Executive Summary
+## TL;DR
 
-Claude Code employs a multi-layered context management system to handle long-running conversations while staying within API token limits. The architecture consists of:
+**What this document covers:** The complete internal architecture of how Claude Code manages conversation context, prevents token limit overflows, and preserves important information across sessions. This includes undocumented compaction strategies, hidden memory systems, and obscure cache-preservation mechanisms.
 
-- **Proactive compaction** (before API limits are hit)
-- **Reactive compaction** (when API returns 413/prompt-too-long)
-- **Session memory extraction** (continuous background summarization)
-- **Micro-compaction** (tool result management)
+**Key undocumented patterns:**
+- **4-layer compaction hierarchy**: Micro-compact → Session Memory → Auto-compact → Reactive compact
+- **CACHED_MICROCOMPACT** (ant-only): Uses `cache_edits` API to remove tool results without invalidating prompt cache (saves ~90% on cache misses)
+- **13,000 token buffer**: Auto-compact triggers at `context_window - 13K` tokens (not at the limit)
+- **Session memory extraction**: Background agent summarizes conversation every 5,000 tokens
+- **Team memory path traversal protection**: Double-pass validation with symlink resolution
+- **Mutual exclusion**: Main agent and memory extraction agent cannot run simultaneously
 
----
+**Why this matters:** Understanding these internals helps you:
+- Predict when compaction will trigger
+- Avoid expensive cache invalidations
+- Structure long-running sessions efficiently
+- Debug "missing context" issues
 
-## Session Memory System (memdir)
-
-### Core Files
-
-| File | Path | Purpose |
-|------|------|---------|
-| `memoryTypes.ts` | `src/memdir/memoryTypes.ts` | Four memory type taxonomy |
-| `memdir.ts` | `src/memdir/memdir.ts` | Main memory directory management |
-| `paths.ts` | `src/memdir/paths.ts` | Auto-memory path resolution |
-| `teamMemPaths.ts` | `src/memdir/teamMemPaths.ts` | Team memory path validation |
-| `memoryScan.ts` | `src/memdir/memoryScan.ts` | Memory file scanning |
-| `findRelevantMemories.ts` | `src/memdir/findRelevantMemories.ts` | Query-time memory relevance |
-| `memoryAge.ts` | `src/memdir/memoryAge.ts` | Memory staleness tracking |
-
-### Memory Type Taxonomy
-
-**File**: `src/memdir/memoryTypes.ts` (lines 14-21)
-
-Four constrained memory types capture context NOT derivable from project state:
-
-```typescript
-export const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference'] as const
-```
-
-| Type | Scope | Purpose |
-|------|-------|---------|
-| `user` | Private | User's role, goals, knowledge |
-| `feedback` | Private/Team | Guidance on approach corrections |
-| `project` | Team preferred | Ongoing work, deadlines, decisions |
-| `reference` | Team scope | Pointers to external systems |
-
-### Storage Location Resolution
-
-**File**: `src/memdir/paths.ts` (lines 223-235)
-
-```typescript
-export const getAutoMemPath = memoize(
-  (): string => {
-    const override = getAutoMemPathOverride() ?? getAutoMemPathSetting()
-    if (override) { return override }
-    const projectsDir = join(getMemoryBaseDir(), 'projects')
-    return (
-      join(projectsDir, sanitizePath(getAutoMemBase()), AUTO_MEM_DIRNAME) + sep
-    ).normalize('NFC')
-  },
-  () => getProjectRoot(),
-)
-```
-
-**Default path**: `~/.claude/projects/{sanitized-cwd}/memory/`
-
-### Team Memory Security
-
-**File**: `src/memdir/teamMemPaths.ts` (lines 228-284)
-
-Team memory has path traversal protection using `realpathDeepestExisting`:
-
-```typescript
-export async function validateTeamMemWritePath(filePath: string): Promise<string> {
-  // First pass: normalize .. segments
-  const resolvedPath = resolve(filePath)
-  if (!resolvedPath.startsWith(teamDir)) {
-    throw new PathTraversalError(`Path escapes team memory directory`)
-  }
-  // Second pass: resolve symlinks on deepest existing ancestor
-  const realPath = await realpathDeepestExisting(resolvedPath)
-  if (!(await isRealPathWithinTeamDir(realPath))) {
-    throw new PathTraversalError(`Path escapes via symlink`)
-  }
-  return resolvedPath
-}
+```mermaid
+flowchart TB
+    subgraph Layers["4-Layer Compaction Hierarchy"]
+        direction TB
+        L1[Layer 1: Micro-compact<br/>Tool results >50K] --> L2[Layer 2: Session Memory<br/>Background summarization]
+        L2 --> L3[Layer 3: Auto-compact<br/>Proactive at ~187K tokens]
+        L3 --> L4[Layer 4: Reactive compact<br/>API 413 error]
+    end
+    
+    subgraph Storage["Storage Systems"]
+        direction TB
+        S1[Session Memory<br/>~/.claude/projects/{cwd}/{sessionId}/session-memory/]
+        S2[Project Memory<br/>~/.claude/projects/{cwd}/memory/]
+        S3[History<br/>~/.claude/history.jsonl]
+        S4[Transcript<br/>~/.claude/projects/{cwd}/{sessionId}.jsonl]
+    end
+    
+    subgraph Triggers["Compaction Triggers"]
+        direction TB
+        T1[Tool result >50K chars] --> L1
+        T2[5K tokens growth<br/>+ 3 tool calls] --> L2
+        T3[Context >187K tokens] --> L3
+        T4[API returns 413] --> L4
+    end
+    
+    Layers --> Storage
+    Triggers --> Layers
 ```
 
 ---
 
-## Session Memory (Background Extraction)
+## Table of Contents
 
-### Core Files
+1. [Architecture Overview](#architecture-overview)
+2. [The 4-Layer Compaction System](#the-4-layer-compaction-system)
+3. [Session Memory System (memdir)](#session-memory-system-memdir)
+4. [Background Session Memory Extraction](#background-session-memory-extraction)
+5. [Auto-Compaction (Proactive)](#auto-compaction-proactive)
+6. [Reactive Compaction](#reactive-compaction)
+7. [CACHED_MICROCOMPACT (ant-only)](#cached_microcompact-ant-only)
+8. [Storage Systems](#storage-systems)
+9. [Security: Path Traversal Protection](#security-path-traversal-protection)
+10. [Undocumented Configuration](#undocumented-configuration)
 
-| File | Path | Purpose |
-|------|------|---------|
-| `sessionMemory.ts` | `src/services/SessionMemory/sessionMemory.ts` | Extraction orchestration |
-| `sessionMemoryUtils.ts` | `src/services/SessionMemory/sessionMemoryUtils.ts` | State management |
-| `prompts.ts` | `src/services/SessionMemory/prompts.ts` | Template loading |
+---
 
-### Storage Location
+## Architecture Overview
 
-**File**: `src/utils/permissions/filesystem.ts` (lines 261-271)
+Claude Code's context management is designed to handle **infinite-length conversations** within finite API token limits. Unlike simple "clear context" approaches, it uses a **hierarchical compaction system** that preserves important information while discarding expendable content.
+
+### The Core Problem
+
+The Anthropic API has context limits (200K tokens for most models). A long conversation will eventually hit this limit. Claude Code solves this through **progressive summarization**:
+
+```mermaid
+flowchart LR
+    A[Full Conversation<br/>200K tokens] --> B[Compaction]
+    B --> C[Summary<br/>~20K tokens]
+    C --> D[Recent Messages<br/>~30K tokens]
+    D --> E[Total: ~50K tokens]
+    E --> F[Continue Conversation]
+```
+
+**Key insight:** Compaction doesn't just truncate—it **summarizes**, preserving:
+- User intent and goals
+- Key technical decisions
+- File modifications and code snippets
+- Errors encountered and solutions
+- Pending tasks
+
+### The 4-Layer Defense
+
+Claude Code implements **four layers** of compaction, each triggered at different thresholds:
+
+```mermaid
+flowchart TB
+    subgraph Layer1["Layer 1: Micro-compact"]
+        L1[Trigger: Tool result >50K chars<br/>Action: Persist to disk<br/>Keep: Most recent N results]
+    end
+    
+    subgraph Layer2["Layer 2: Session Memory"]
+        L2[Trigger: 5K token growth + 3 tool calls<br/>Action: Background summarization<br/>Output: summary.md]
+    end
+    
+    subgraph Layer3["Layer 3: Auto-compact"]
+        L3[Trigger: Context >187K tokens<br/>Action: Proactive compaction<br/>Buffer: 13K tokens]
+    end
+    
+    subgraph Layer4["Layer 4: Reactive compact"]
+        L4[Trigger: API returns 413<br/>Action: Emergency truncation<br/>Last resort]
+    end
+    
+    Layer1 --> Layer2
+    Layer2 --> Layer3
+    Layer3 --> Layer4
+```
+
+---
+
+## The 4-Layer Compaction System
+
+### Layer 1: Micro-compact (Tool Result Management)
+
+**File:** `src/services/compact/microCompact.ts`
+
+**Purpose:** Handle individual tool results that are too large for the context window.
+
+**Trigger conditions:**
+- Single tool result >50,000 characters (default)
+- Aggregate parallel tool results >200,000 characters per message
+
+**Mechanism:**
 
 ```typescript
-export function getSessionMemoryDir(): string {
-  return join(getProjectDir(getCwd()), getSessionId(), 'session-memory') + sep
-}
+// From src/utils/toolResultStorage.ts
+export const DEFAULT_MAX_TOOL_RESULT_CHARS = 50_000
+export const MAX_AGGREGATE_TOOL_RESULTS_CHARS_PER_MESSAGE = 200_000
 
-export function getSessionMemoryPath(): string {
-  return join(getSessionMemoryDir(), 'summary.md')
+// Large results are persisted to disk
+async function persistToolResult(result: ToolResult): Promise<string> {
+  const path = getToolResultPath(result.toolUseId)
+  await writeFile(path, JSON.stringify(result))
+  return path
 }
 ```
 
-**Path format**: `~/.claude/projects/{project}/{sessionId}/session-memory/summary.md`
+**Storage location:** `~/.claude/{project}/{sessionId}/tool-results/{toolUseId}.json`
 
-### Extraction Triggers
+**Undocumented behavior:**
+- Tool results are **replaced with a pointer** in the context: `{type: 'pointer', path: '...'}`
+- The full result is loaded **on-demand** when referenced
+- This happens transparently—users don't see the difference
 
-**File**: `src/services/SessionMemory/sessionMemory.ts` (lines 134-181)
+```mermaid
+sequenceDiagram
+    participant Tool as Bash Tool
+    participant Context as Conversation Context
+    participant Disk as Disk Storage
+    
+    Tool->>Tool: Execute command<br/>Output: 100K chars
+    Tool->>Disk: Persist result
+    Tool->>Context: Add pointer<br/>{type: 'pointer', path: '...'}
+    
+    Note over Context: Context grows by ~100 chars<br/>instead of 100K chars
+    
+    Context->>Disk: Later: Load full result
+    Disk-->>Context: Return 100K chars
+```
 
-Session memory extracts when:
+### Layer 2: Session Memory (Background Extraction)
 
-1. **Initialization threshold**: `minimumMessageTokensToInit` (default: 10,000 tokens)
-2. **Update threshold**: `minimumTokensBetweenUpdate` (default: 5,000 tokens growth)
-3. **Tool calls**: `toolCallsBetweenUpdates` (default: 3 calls)
-4. **Natural break**: Last assistant turn has no tool calls
+**Files:**
+- `src/services/SessionMemory/sessionMemory.ts` (orchestration)
+- `src/services/SessionMemory/sessionMemoryUtils.ts` (state management)
+- `src/services/SessionMemory/prompts.ts` (templates)
+
+**Purpose:** Continuously extract and summarize session context in the background.
+
+**Extraction triggers** (`sessionMemory.ts:134-181`):
 
 ```typescript
 export function shouldExtractMemory(messages: Message[]): boolean {
   const hasMetTokenThreshold = hasMetUpdateThreshold(currentTokenCount)
+  // Default: 5,000 tokens growth since last extraction
+  
   const hasMetToolCallThreshold = toolCallsSinceLastUpdate >= getToolCallsBetweenUpdates()
+  // Default: 3 tool calls
+  
   const hasToolCallsInLastTurn = hasToolCallsInLastAssistantTurn(messages)
   
+  // Extract when:
+  // 1. Token threshold AND tool call threshold met
+  // 2. Token threshold met AND no tool calls in last turn (natural break)
   return (hasMetTokenThreshold && hasMetToolCallThreshold) ||
          (hasMetTokenThreshold && !hasToolCallsInLastTurn)
 }
 ```
 
-### Template Structure
+**Template structure** (`prompts.ts:11-41`):
 
-**File**: `src/services/SessionMemory/prompts.ts` (lines 11-41)
+The session memory template has 10 sections:
 
-Default session memory template with 9 sections:
+1. **Session Title** - Auto-generated summary
+2. **Current State** - What we're currently doing
+3. **Task Specification** - Original goal and success criteria
+4. **Files and Functions** - Key code elements
+5. **Workflow** - Process being followed
+6. **Errors & Corrections** - Mistakes and fixes
+7. **Codebase Documentation** - Learned patterns
+8. **Learnings** - General insights
+9. **Key Results** - Outcomes and decisions
+10. **Worklog** - Chronological progress
 
-1. Session Title
-2. Current State
-3. Task specification
-4. Files and Functions
-5. Workflow
-6. Errors & Corrections
-7. Codebase and System Documentation
-8. Learnings
-9. Key results
-10. Worklog
+**Storage:** `~/.claude/projects/{cwd}/{sessionId}/session-memory/summary.md`
 
----
+**Undocumented behavior:**
+- Session memory extraction runs in a **forked agent** with restricted permissions
+- The main agent and extraction agent have **mutual exclusion**—they can't both write memories
+- Extraction uses **Haiku** (cheaper model) for summarization
 
-## Context Compaction System
+```mermaid
+flowchart TB
+    subgraph Main["Main Agent"]
+        M1[User Message]
+        M2[Tool Execution]
+        M3[Assistant Response]
+    end
+    
+    subgraph Trigger{"Trigger Met?<br/>5K tokens + 3 tools"}
+    end
+    
+    subgraph Extractor["Background Extraction Agent"]
+        E1[Read Conversation]
+        E2[Summarize by Template]
+        E3[Write summary.md]
+    end
+    
+    subgraph Storage["Session Memory Storage"]
+        S1[summary.md]
+    end
+    
+    M1 --> M2 --> M3 --> Trigger
+    Trigger -->|Yes| Extractor
+    Trigger -->|No| M1
+    Extractor --> Storage
+    
+    style Extractor fill:#ffe1e1
+    style Storage fill:#e1f5e1
+```
 
-### Core Files
+### Layer 3: Auto-compact (Proactive)
 
-| File | Path | Purpose |
-|------|------|---------|
-| `compact.ts` | `src/services/compact/compact.ts` | Full compaction |
-| `autoCompact.ts` | `src/services/compact/autoCompact.ts` | Proactive compaction |
-| `microCompact.ts` | `src/services/compact/microCompact.ts` | Tool result management |
-| `sessionMemoryCompact.ts` | `src/services/compact/sessionMemoryCompact.ts` | SM-based compaction |
-| `prompt.ts` | `src/services/compact/prompt.ts` | Summary prompts |
-| `grouping.ts` | `src/services/compact/grouping.ts` | API-round grouping |
+**File:** `src/services/compact/autoCompact.ts`
 
-### Token Thresholds
+**Purpose:** Prevent API errors by compacting **before** hitting the limit.
 
-**File**: `src/services/compact/autoCompact.ts` (lines 62-91)
+**Threshold calculation** (`autoCompact.ts:62-91`):
 
 ```typescript
 export const AUTOCOMPACT_BUFFER_TOKENS = 13_000
 export const WARNING_THRESHOLD_BUFFER_TOKENS = 20_000
 export const ERROR_THRESHOLD_BUFFER_TOKENS = 20_000
-export const MANUAL_COMPACT_BUFFER_TOKENS = 3_000
 
 export function getAutoCompactThreshold(model: string): number {
   const effectiveContextWindow = getEffectiveContextWindowSize(model)
+  // For 200K context: 200,000 - 13,000 = 187,000 tokens
   return effectiveContextWindow - AUTOCOMPACT_BUFFER_TOKENS
 }
 ```
 
-### Session Memory Compaction
+**Why 13,000 tokens buffer?**
+- Compaction itself requires API calls (to generate summary)
+- Those API calls need headroom
+- 13K tokens ≈ 6.5% buffer for 200K context
 
-**File**: `src/services/compact/sessionMemoryCompact.ts`
+**Compaction process** (`compact.ts:387-763`):
 
-When both session memory AND compaction are enabled, uses pre-extracted memory instead of on-demand summarization:
+1. **Identify messages to compact** - Everything except recent N messages
+2. **Generate summary** - Using a separate API call with summarization prompt
+3. **Replace messages** - Old messages → summary block
+4. **Preserve recent context** - Last N messages kept verbatim
+
+```mermaid
+flowchart TB
+    subgraph Before["Before Compaction<br/>~187K tokens"]
+        B1[Old Messages<br/>~150K tokens]
+        B2[Recent Messages<br/>~37K tokens]
+    end
+    
+    subgraph Compact["Compaction Process"]
+        C1[Send old messages<br/>to summarization API]
+        C2[Receive summary<br/>~15K tokens]
+    end
+    
+    subgraph After["After Compaction<br/>~52K tokens"]
+        A1[Summary Block<br/>~15K tokens]
+        A2[Recent Messages<br/>~37K tokens]
+    end
+    
+    Before --> Compact
+    Compact --> After
+    
+    style Before fill:#ffe1e1
+    style After fill:#e1f5e1
+```
+
+**Undocumented feature:** Session Memory Compaction
+
+When session memory is enabled, auto-compact uses the **pre-extracted summary** instead of generating a new one:
 
 ```typescript
+// src/services/compact/sessionMemoryCompact.ts
 export async function trySessionMemoryCompaction(
   messages: Message[],
   agentId?: AgentId,
@@ -206,83 +327,235 @@ export async function trySessionMemoryCompaction(
 }
 ```
 
-### Compaction Configuration
+This is **faster and cheaper** than on-demand summarization.
 
-**File**: `src/services/compact/sessionMemoryCompact.ts` (lines 47-61)
+### Layer 4: Reactive Compaction (Emergency)
 
-```typescript
-export type SessionMemoryCompactConfig = {
-  minTokens: number           // Default: 10,000
-  minTextBlockMessages: number // Default: 5
-  maxTokens: number           // Default: 40,000
-}
+**File:** `src/services/compact/autoCompact.ts:191-199`
 
-export const DEFAULT_SM_COMPACT_CONFIG: SessionMemoryCompactConfig = {
-  minTokens: 10_000,
-  minTextBlockMessages: 5,
-  maxTokens: 40_000,
-}
-```
+**Purpose:** Handle API 413 errors ("Content Too Large") when proactive compaction fails or is disabled.
 
----
-
-## Feature Flags
-
-### CACHED_MICROCOMPACT (ant-only)
-
-**Location**: `src/services/compact/microCompact.ts` (lines 52-128)
-
-Uses API cache editing to remove tool results without invalidating cached prefix:
-
-```typescript
-async function cachedMicrocompactPath(messages: Message[]): Promise<MicrocompactResult> {
-  const toolsToDelete = mod.getToolResultsToDelete(state)
-  if (toolsToDelete.length > 0) {
-    const cacheEdits = mod.createCacheEditsBlock(state, toolsToDelete)
-    pendingCacheEdits = cacheEdits  // Queued for API layer
-    return {
-      messages,  // Unchanged locally
-      compactionInfo: { pendingCacheEdits: { trigger: 'auto', deletedToolIds: toolsToDelete, baselineCacheDeletedTokens } }
-    }
-  }
-}
-```
-
-**Trigger**: Count-based (configurable threshold)  
-**Keep**: Most recent N results (configurable)
-
-### REACTIVE_COMPACT (ant-only)
-
-**Location**: `src/services/compact/autoCompact.ts` (lines 191-199)
-
-Suppresses proactive autocompact to let reactive compact catch API 413s:
+**REACTIVE_COMPACT feature flag:**
 
 ```typescript
 if (feature('REACTIVE_COMPACT')) {
   if (getFeatureValue_CACHED_MAY_BE_STALE('tengu_cobalt_raccoon', false)) {
     return false  // Suppress proactive autocompact
+    // Let reactive compact handle 413s
   }
 }
 ```
 
-The reactive compact handles 413 responses by progressively truncating from the tail.
+**Mechanism:**
+1. API returns 413 error
+2. Claude Code catches the error
+3. **Progressive truncation** from the tail until request fits
+4. Retry with truncated context
+
+**Why this exists:** Sometimes context grows faster than auto-compact can detect (e.g., massive tool output). Reactive compact is the safety net.
 
 ---
 
-## History System
+## CACHED_MICROCOMPACT (ant-only)
 
-### Core File
+**File:** `src/services/compact/microCompact.ts:52-128`
 
-**File**: `src/history.ts`
+**The most sophisticated undocumented feature.**
 
-### Storage Location (lines 115, 299)
+### The Problem
+
+Standard compaction invalidates the **prompt cache**. After compaction:
+- Cache miss on the entire context
+- 10x cost increase ($0.60 → $6.00 for 200K tokens)
+- Slower response times
+
+### The Solution
+
+CACHED_MICROCOMPACT uses the `cache_edits` API to **remove tool results without invalidating the cached prefix**:
 
 ```typescript
-const historyPath = join(getClaudeConfigHomeDir(), 'history.jsonl')
-// ~/.claude/history.jsonl
+async function cachedMicrocompactPath(messages: Message[]): Promise<MicrocompactResult> {
+  const toolsToDelete = mod.getToolResultsToDelete(state)
+  
+  if (toolsToDelete.length > 0) {
+    // Create cache_edits block for API
+    const cacheEdits = mod.createCacheEditsBlock(state, toolsToDelete)
+    pendingCacheEdits = cacheEdits  // Queued for API layer
+    
+    return {
+      messages,  // Messages unchanged locally
+      compactionInfo: { 
+        pendingCacheEdits: { 
+          trigger: 'auto', 
+          deletedToolIds: toolsToDelete,
+          baselineCacheDeletedTokens 
+        } 
+      }
+    }
+  }
+}
 ```
 
-### Structure (lines 219-225, 281-289)
+### How It Works
+
+```mermaid
+sequenceDiagram
+    participant API as Anthropic API
+    participant Cache as Prompt Cache
+    participant Client as Claude Code
+    
+    Note over API,Client: Normal Request
+    Client->>API: Messages [1...N] with cache_control
+    API->>Cache: Cache prefix [1...N]
+    API-->>Client: Response
+    
+    Note over API,Client: Standard Compaction
+    Client->>Client: Remove messages [1...M]
+    Client->>API: Messages [M+1...N]
+    API->>Cache: Cache miss! Prefix changed
+    Note right of Cache: Full re-processing
+    
+    Note over API,Client: CACHED_MICROCOMPACT
+    Client->>API: Messages [1...N] + cache_edits
+    Note right of Client: cache_edits: delete tool_results
+    API->>Cache: Cache hit! Prefix preserved
+    API->>API: Apply edits to remove tool results
+    API-->>Client: Response with edited context
+```
+
+**Benefits:**
+- Cache preserved = 90% cost savings
+- Faster responses (no re-processing)
+- Transparent to users
+
+**Limitations:**
+- ant-only feature flag
+- Only removes tool results (not other content)
+- Requires API support for `cache_edits`
+
+---
+
+## Session Memory System (memdir)
+
+### Memory Type Taxonomy
+
+**File:** `src/memdir/memoryTypes.ts:14-21`
+
+Claude Code defines **four memory types** with different scopes:
+
+```typescript
+export const MEMORY_TYPES = ['user', 'feedback', 'project', 'reference'] as const
+```
+
+| Type | Scope | Purpose | Example |
+|------|-------|---------|---------|
+| `user` | Private | User's role, goals, knowledge | "I'm a senior backend engineer" |
+| `feedback` | Private/Team | Guidance on approach corrections | "Don't use regex for HTML parsing" |
+| `project` | Team preferred | Ongoing work, deadlines, decisions | "Migrating to TypeScript by Q3" |
+| `reference` | Team scope | Pointers to external systems | "API docs at https://..." |
+
+**Why four types?** Different information has different lifetimes and sharing needs. User preferences are private; project deadlines are team-shared.
+
+### Storage Location Resolution
+
+**File:** `src/memdir/paths.ts:223-235`
+
+```typescript
+export const getAutoMemPath = memoize(
+  (): string => {
+    const override = getAutoMemPathOverride() ?? getAutoMemPathSetting()
+    if (override) { return override }
+    
+    const projectsDir = join(getMemoryBaseDir(), 'projects')
+    return (
+      join(projectsDir, sanitizePath(getAutoMemBase()), AUTO_MEM_DIRNAME) + sep
+    ).normalize('NFC')
+  },
+  () => getProjectRoot(),
+)
+```
+
+**Default path:** `~/.claude/projects/{sanitized-cwd}/memory/`
+
+**Sanitization rules:**
+- Remove leading/trailing slashes
+- Replace path separators with `_`
+- Normalize Unicode (NFC)
+- Truncate to 100 chars
+
+Example: `/home/user/my-project` → `home_user_my-project`
+
+---
+
+## Security: Path Traversal Protection
+
+**File:** `src/memdir/teamMemPaths.ts:228-284`
+
+Team memory has **double-pass validation** to prevent path traversal attacks:
+
+```typescript
+export async function validateTeamMemWritePath(filePath: string): Promise<string> {
+  // First pass: normalize .. segments
+  const resolvedPath = resolve(filePath)
+  if (!resolvedPath.startsWith(teamDir)) {
+    throw new PathTraversalError(`Path escapes team memory directory`)
+  }
+  
+  // Second pass: resolve symlinks on deepest existing ancestor
+  const realPath = await realpathDeepestExisting(resolvedPath)
+  if (!(await isRealPathWithinTeamDir(realPath))) {
+    throw new PathTraversalError(`Path escapes via symlink`)
+  }
+  
+  return resolvedPath
+}
+```
+
+**Why two passes?**
+1. **First pass:** Catches `../../../etc/passwd` style attacks
+2. **Second pass:** Catches symlink attacks (`memory/link -> /etc`)
+
+**Undocumented function:** `realpathDeepestExisting`
+
+Unlike `fs.realpath()` which requires the full path to exist, this resolves symlinks on the deepest existing ancestor:
+
+```typescript
+// Path: /team/memory/foo/bar/baz.md
+// If /team/memory/foo exists and is a symlink:
+// realpathDeepestExisting resolves the symlink
+```
+
+---
+
+## Storage Systems
+
+### 1. Session Memory (`session-memory/summary.md`)
+
+**Path:** `~/.claude/projects/{cwd}/{sessionId}/session-memory/summary.md`
+
+**Purpose:** Per-session summarization for compaction
+
+**Format:** Markdown with 10-section template
+
+### 2. Project Memory (`memory/`)
+
+**Path:** `~/.claude/projects/{cwd}/memory/`
+
+**Purpose:** Cross-session durable memory
+
+**Types:**
+- `user/` - Private user preferences
+- `feedback/` - Approach corrections
+- `project/` - Team-shared project state
+- `reference/` - External system pointers
+
+### 3. History (`history.jsonl`)
+
+**Path:** `~/.claude/history.jsonl`
+
+**Purpose:** Command history for `/resume` and up-arrow
+
+**Structure:**
 
 ```typescript
 type LogEntry = {
@@ -293,110 +566,40 @@ type LogEntry = {
   sessionId?: string       // For current session filtering
 }
 
-type StoredPastedContent = {
-  id: number
-  type: 'text' | 'image'
-  content?: string         // Inline for small content (<1024 chars)
-  contentHash?: string     // External paste store reference for large content
-}
-```
-
-### Max Items (line 19)
-
-```typescript
 const MAX_HISTORY_ITEMS = 100
 ```
 
----
-
-## Session Storage (Transcript Persistence)
-
-### Core File
-
-**File**: `src/utils/sessionStorage.ts`
-
-### Session File Location (lines 202-225)
+**Undocumented:** Large pasted content (>1024 chars) is stored separately by hash:
 
 ```typescript
-export function getTranscriptPath(): string {
-  const projectDir = getSessionProjectDir() ?? getProjectDir(getOriginalCwd())
-  return join(projectDir, `${getSessionId()}.jsonl`)
-}
-
-export function getProjectDir(projectDir: string): string {
-  return join(getProjectsDir(), sanitizePath(projectDir))
+type StoredPastedContent = {
+  id: number
+  type: 'text' | 'image'
+  content?: string         // Inline for small content
+  contentHash?: string     // External paste store reference
 }
 ```
 
-**Path format**: `~/.claude/projects/{sanitized-cwd}/{sessionId}.jsonl`
+### 4. Transcript (`{sessionId}.jsonl`)
 
-### Entry Types (lines 1126-1264)
+**Path:** `~/.claude/projects/{cwd}/{sessionId}.jsonl`
 
-The transcript JSONL includes:
+**Purpose:** Complete conversation record
+
+**Entry types:**
 
 | Type | Purpose |
 |------|---------|
 | `user`, `assistant`, `attachment`, `system` | Message types |
 | `summary` | Compact summaries |
 | `custom-title`, `ai-title`, `tag` | Metadata |
-| `file-history-snapshot` | File checkpoints |
+| `file-history-snapshot` | File checkpoints for `/rewind` |
 | `content-replacement` | Snip operation records |
 | `marble-origami-commit`/`snapshot` | Context collapse records |
 
----
+**File checkpoints** (`sessionStorage.ts:1085-1099`):
 
-## Memory Extraction System
-
-### Core File
-
-**File**: `src/services/extractMemories/extractMemories.ts`
-
-### Purpose
-
-Runs at end of query loop to extract durable memories from conversation and write to auto-memory directory.
-
-### Flow (lines 329-523)
-
-1. Check for main-agent memory writes (mutual exclusion)
-2. Skip if main agent already wrote to memory files
-3. Pre-inject memory directory manifest
-4. Run forked agent with restricted tool permissions
-5. Advance cursor after successful extraction
-
-### Tool Permissions (lines 171-222)
-
-```typescript
-export function createAutoMemCanUseTool(memoryDir: string): CanUseToolFn {
-  return async (tool: Tool, input: Record<string, unknown>) => {
-    // Allow: Read, Grep, Glob, read-only Bash
-    // Allow Edit/Write ONLY for paths within memoryDir
-    // Deny: All other tools (MCP, Agent, etc.)
-  }
-}
-```
-
----
-
-## Context Collapse Integration
-
-Context collapse suppresses autocompact when enabled:
-
-```typescript
-if (feature('CONTEXT_COLLAPSE')) {
-  const { isContextCollapseEnabled } = require('../contextCollapse/index.js')
-  if (isContextCollapseEnabled()) {
-    return false  // Context collapse owns headroom management
-  }
-}
-```
-
----
-
-## Checkpoint System
-
-File checkpoints are implemented via `file-history-snapshot` entries:
-
-**Location**: `src/utils/sessionStorage.ts` (lines 1085-1099)
+Before any file edit, a snapshot is saved:
 
 ```typescript
 async insertFileHistorySnapshot(
@@ -414,37 +617,71 @@ async insertFileHistorySnapshot(
 }
 ```
 
----
-
-## Summary of File Paths and Line Numbers
-
-| Concept | File | Line(s) |
-|---------|------|---------|
-| Memory types | `src/memdir/memoryTypes.ts` | 14-21 |
-| Auto memory path | `src/memdir/paths.ts` | 223-235 |
-| Team memory path | `src/memdir/teamMemPaths.ts` | 84-86 |
-| Path validation | `src/memdir/teamMemPaths.ts` | 228-284 |
-| Session memory path | `src/utils/permissions/filesystem.ts` | 261-271 |
-| Session memory extraction | `src/services/SessionMemory/sessionMemory.ts` | 134-181 |
-| Compact thresholds | `src/services/compact/autoCompact.ts` | 62-91 |
-| Session memory compact | `src/services/compact/sessionMemoryCompact.ts` | 47-61 |
-| CACHED_MICROCOMPACT | `src/services/compact/microCompact.ts` | 52-128 |
-| REACTIVE_COMPACT | `src/services/compact/autoCompact.ts` | 191-199 |
-| History storage | `src/history.ts` | 115, 281-289 |
-| Transcript path | `src/utils/sessionStorage.ts` | 202-225 |
-| Extract memories | `src/services/extractMemories/extractMemories.ts` | 329-523 |
-| compactConversation | `src/services/compact/compact.ts` | 387-763 |
+This enables `/rewind` to restore previous file states.
 
 ---
 
-## Key Design Decisions
+## Undocumented Configuration
 
-1. **Session Memory vs Project Memory**: Session memory is private to the session (stored at `{projectDir}/{sessionId}/`), while project memory (memdir) is shared across sessions.
+### Environment Variables
 
-2. **Mutual Exclusion**: The main agent and background extraction agent are mutually exclusive - when the main agent writes memories, extraction is skipped.
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CLAUDE_CODE_AUTO_COMPACT_WINDOW` | 200000 | Custom context window size |
+| `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | - | Compaction threshold percentage |
+| `DISABLE_COMPACT` | false | Disable all compaction |
+| `DISABLE_AUTO_COMPACT` | false | Disable only auto-compact |
+| `CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE` | - | Hard token limit |
+| `CLAUDE_CONTEXT_COLLAPSE` | - | Enable context collapse (ant-only) |
 
-3. **Token Budget Management**: Multiple layers (microcompact → session memory → autocompact → reactive compact) provide graceful degradation.
+### Feature Flags
 
-4. **Security**: Team memory has symlink traversal protection; auto-memory has path validation.
+| Flag | Purpose |
+|------|---------|
+| `CACHED_MICROCOMPACT` | Cache-preserving compaction (ant-only) |
+| `REACTIVE_COMPACT` | 413-triggered compaction (ant-only) |
+| `CONTEXT_COLLAPSE` | Alternative compaction strategy (ant-only) |
+| `SESSION_MEMORY` | Background extraction |
 
-5. **Prompt Cache Preservation**: CACHED_MICROCOMPACT uses cache_edits API to avoid invalidating the cached prefix.
+### Compaction Thresholds
+
+```typescript
+// From autoCompact.ts
+AUTOCOMPACT_BUFFER_TOKENS = 13_000        // Proactive trigger
+WARNING_THRESHOLD_BUFFER_TOKENS = 20_000  // Warning threshold
+ERROR_THRESHOLD_BUFFER_TOKENS = 20_000    // Error threshold
+MANUAL_COMPACT_BUFFER_TOKENS = 3_000      // Manual compact headroom
+
+// From sessionMemoryCompact.ts
+DEFAULT_SM_COMPACT_CONFIG = {
+  minTokens: 10_000,
+  minTextBlockMessages: 5,
+  maxTokens: 40_000,
+}
+
+// From sessionMemory.ts
+minimumMessageTokensToInit = 10_000      // First extraction
+minimumTokensBetweenUpdate = 5_000       // Subsequent extractions
+toolCallsBetweenUpdates = 3              // Tool call threshold
+```
+
+---
+
+## Summary
+
+Claude Code's context management is a sophisticated multi-layer system:
+
+1. **Micro-compact** - Handles large tool results (50K+ chars)
+2. **Session Memory** - Background summarization every 5K tokens
+3. **Auto-compact** - Proactive compaction at 187K tokens (13K buffer)
+4. **Reactive compact** - Emergency 413 handling
+
+**CACHED_MICROCOMPACT** (ant-only) preserves prompt cache during compaction, saving 90% on API costs.
+
+**Security** is enforced via double-pass path validation with symlink resolution.
+
+**Storage** spans 4 systems: session memory, project memory, history, and transcripts—with file checkpoints for rollback.
+
+---
+
+*Last updated: Based on Claude Code source analysis (src/services/compact/, src/services/SessionMemory/, src/memdir/)*

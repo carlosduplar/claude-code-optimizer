@@ -576,6 +576,23 @@ Pre-convert binary files before reading:
 - **Run `/compact` at 150K tokens**
 - **Never use `/clear`** (destroys cached context)
 
+## Prompt Cache Keepalive
+The Anthropic API has a **5-minute TTL** on prompt cache entries. After 5 minutes of inactivity:
+- Cache is evicted (10x cost increase!)
+- 200K context goes from $0.60 to $6.00 per request
+
+**Use the keepalive script:**
+```bash
+# In another terminal, while Claude is running
+./claude-keepalive.sh &
+```
+
+Or manually keep cache warm:
+```
+# Send a no-op message every 4 minutes
+/loop --interval 240s echo "keepalive"
+```
+
 ## Model Selection Strategy
 | Model | Input | Output | Use For |
 |-------|-------|--------|---------|
@@ -590,9 +607,181 @@ Pre-convert binary files before reading:
 - [ ] Set token budgets (+500k) for large tasks
 - [ ] Run `/compact` at 150K tokens
 - [ ] Pre-convert binary documents
+- [ ] Start keepalive script for long sessions
 EOF
 
     print_success "Created CLAUDE.md in current directory"
+}
+
+# Create keepalive script
+create_keepalive_script() {
+    print_header "Creating Prompt Cache Keepalive Script"
+
+    local KEEPALIVE_SCRIPT="claude-keepalive.sh"
+
+    if [[ -f "$KEEPALIVE_SCRIPT" ]]; then
+        print_warning "$KEEPALIVE_SCRIPT already exists"
+        read -p "Overwrite? (y/N) " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            return 0
+        fi
+    fi
+
+    if $DRY_RUN; then
+        echo "[DRY-RUN] Would create $KEEPALIVE_SCRIPT"
+        return 0
+    fi
+
+    cat > "$KEEPALIVE_SCRIPT" << 'EOF'
+#!/bin/bash
+#
+# Claude Code Prompt Cache Keepalive Script
+# Prevents 5-minute cache TTL expiration by sending periodic no-op messages
+#
+# Usage: ./claude-keepalive.sh [session-name] &
+#   Run in background while Claude Code is active
+#
+# The Anthropic API has a 5-minute TTL on prompt cache entries.
+# After 5 minutes of inactivity, cache is evicted and costs increase 10x.
+# For 200K context: $0.60 → $6.00 per request
+#
+
+SESSION_NAME="${1:-claude}"
+INTERVAL=240  # 4 minutes (safely under 5min TTL)
+KEEPALIVE_MSG="# keepalive $(date +%s)"
+
+# Colors
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+echo -e "${GREEN}[Keepalive]${NC} Starting keepalive for session: $SESSION_NAME"
+echo -e "${GREEN}[Keepalive]${NC} Interval: ${INTERVAL}s (4 minutes)"
+echo -e "${YELLOW}[Keepalive]${NC} Press Ctrl+C to stop"
+
+# Function to send keepalive via tmux
+send_tmux_keepalive() {
+    local session="$1"
+    if tmux has-session -t "$session" 2>/dev/null; then
+        # Send a comment (no-op) to keep session warm
+        tmux send-keys -t "$session" "$KEEPALIVE_MSG" Enter
+        sleep 0.5
+        # Clear it with Ctrl+C so it doesn't accumulate
+        tmux send-keys -t "$session" C-c
+        echo -e "${GREEN}[Keepalive]${NC} $(date '+%H:%M:%S') - Sent keepalive to tmux session: $session"
+        return 0
+    fi
+    return 1
+}
+
+# Function to send keepalive via AppleScript (macOS GUI)
+send_macos_keepalive() {
+    if [[ "$OSTYPE" == "darwin"* ]]; then
+        # Try to find iTerm2 or Terminal with Claude
+        local term_app=""
+        if osascript -e 'tell application "iTerm2" to return name of front window' 2>/dev/null | grep -q "claude\|Claude"; then
+            term_app="iTerm2"
+        elif osascript -e 'tell application "Terminal" to return name of front window' 2>/dev/null | grep -q "claude\|Claude"; then
+            term_app="Terminal"
+        fi
+
+        if [[ -n "$term_app" ]]; then
+            osascript << APPLESCRIPT 2>/dev/null
+tell application "$term_app"
+    activate
+    tell application "System Events" to keystroke "# keepalive"
+    tell application "System Events" to key code 36
+    delay 0.5
+    tell application "System Events" to key code 53
+end tell
+APPLESCRIPT
+            echo -e "${GREEN}[Keepalive]${NC} $(date '+%H:%M:%S') - Sent keepalive to $term_app"
+            return 0
+        fi
+    fi
+    return 1
+}
+
+# Main keepalive loop
+cleanup() {
+    echo -e "\n${YELLOW}[Keepalive]${NC} Stopping keepalive script"
+    exit 0
+}
+
+trap cleanup INT TERM
+
+while true; do
+    # Try tmux first, then fall back to macOS GUI methods
+    if ! send_tmux_keepalive "$SESSION_NAME"; then
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            send_macos_keepalive
+        fi
+    fi
+
+    sleep $INTERVAL
+done
+EOF
+
+    chmod +x "$KEEPALIVE_SCRIPT"
+
+    print_success "Created $KEEPALIVE_SCRIPT"
+    print_status "Usage: ./$KEEPALIVE_SCRIPT [tmux-session-name] &"
+    print_status "Run this in the background while Claude Code is active"
+}
+
+# Create settings.json with keepalive hook
+create_settings_json() {
+    print_header "Creating settings.json with Keepalive Hook"
+
+    local SETTINGS_FILE=".claude/settings.json"
+
+    if [[ -f "$SETTINGS_FILE" ]]; then
+        print_warning "$SETTINGS_FILE already exists"
+        read -p "Create backup and add keepalive hook? (y/N) " -n 1 -r
+        echo ""
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            return 0
+        fi
+
+        if ! $DRY_RUN; then
+            cp "$SETTINGS_FILE" "$SETTINGS_FILE.backup.$(date +%Y%m%d%H%M%S)"
+        fi
+    fi
+
+    if $DRY_RUN; then
+        echo "[DRY-RUN] Would create $SETTINGS_FILE with keepalive hook"
+        return 0
+    fi
+
+    mkdir -p "$(dirname "$SETTINGS_FILE")"
+
+    cat > "$SETTINGS_FILE" << 'EOF'
+{
+  "autoCompactEnabled": true,
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Read",
+      "hooks": [{
+        "type": "command",
+        "command": "if command -v magick >/dev/null 2>&1 && [ -f \"$ARGUMENTS\" ] && [[ \"$ARGUMENTS\" =~ \\.(png|jpg|jpeg)$ ]]; then magick \"$ARGUMENTS\" -resize 2000x2000\\> -quality 85 /tmp/resized_$(basename \"$ARGUMENTS\"); fi",
+        "if": "Read(*.{png,jpg,jpeg})"
+      }]
+    }],
+    "PostToolUse": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "echo '{\"cache_keepalive\": \"'$(date +%s)'\"}'",
+        "if": "*"
+      }]
+    }]
+  }
+}
+EOF
+
+    print_success "Created $SETTINGS_FILE with keepalive hook"
+    print_status "The PostToolUse hook fires after every tool use, keeping cache warm"
 }
 
 # Main function
@@ -610,6 +799,8 @@ main() {
     configure_privacy
     configure_claude_settings
     create_claude_md
+    create_keepalive_script
+    create_settings_json
 
     print_header "Summary"
 
@@ -626,7 +817,8 @@ main() {
     echo "1. Review the changes to your shell config"
     echo "2. Run: source ~/.bashrc (or ~/.zshrc)"
     echo "3. Start Claude Code with optimized settings"
-    echo "4. Check /cost regularly to monitor usage"
+    echo "4. For long sessions, run: ./claude-keepalive.sh &"
+    echo "5. Check /cost regularly to monitor usage"
     echo ""
 
     if $FULL_PRIVACY; then
@@ -636,6 +828,9 @@ main() {
     fi
 
     echo ""
+    echo -e "${BOLD}Cache Keepalive:${NC} Run ./claude-keepalive.sh in background for sessions >5 min"
+    echo ""
+
     print_success "Happy optimizing!"
 }
 

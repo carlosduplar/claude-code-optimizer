@@ -348,11 +348,11 @@ Claude Code reads environment variables at startup. **You must restart Claude Co
 
 ## Related Documentation
 
-- [`subscription-guide.md`](subscription-guide.md) - Step-by-step optimization guide
-- [`telemetry-privacy.md`](telemetry-privacy.md) - Detailed privacy settings
-- [`token-optimization.md`](token-optimization.md) - Token reduction strategies
+- [`prompt-caching.md`](prompt-caching.md) - 5-minute TTL behavior, keepalive strategies, cache optimization
+- [`telemetry-privacy.md`](telemetry-privacy.md) - Detailed telemetry and privacy internals
+- [`undocumented-features.md`](undocumented-features.md) - Environment variables and feature flags
 - [`CLAUDE.md-template`](CLAUDE.md-template) - Ready-to-use project template
 
 ---
 
-*These scripts are based on analysis of the Claude Code source code and official documentation.*
+*These scripts are based on analysis of the Claude Code source code.*
