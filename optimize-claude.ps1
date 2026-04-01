@@ -179,6 +179,8 @@ function Test-Poppler {
 
     # Check common installation paths and add to PATH if found
     $popplerPaths = @(
+        "C:\tools\poppler\bin",
+        "C:\ProgramData\chocolatey\lib\poppler-utils\tools",
         "C:\ProgramData\chocolatey\lib\poppler\tools",
         "C:\ProgramData\chocolatey\bin",
         "C:\Program Files\poppler\bin",
@@ -329,25 +331,28 @@ function Install-Poppler {
     }
 
     if ($DryRun) {
-        Write-Host "[DRY-RUN] Would run: choco install poppler -y"
+        Write-Host "[DRY-RUN] Would run: choco install poppler-utils -y"
         return $true
     }
 
     try {
-        $chocoOutput = choco install poppler -y 2>&1
+        # Try poppler-utils first (binary package)
+        $chocoOutput = choco install poppler-utils -y 2>&1
         
-        # Check if already installed (choco returns success but with warning)
+        # Check if already installed
         $alreadyInstalled = $chocoOutput -match "already installed"
         
         # Refresh environment variables from registry
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 
-        # Search for pdftotext.exe in poppler installation directory
+        # Search for pdftotext.exe in various locations
         $popplerPaths = @(
+            "C:\ProgramData\chocolatey\lib\poppler-utils\tools",
             "C:\ProgramData\chocolatey\lib\poppler\tools",
             "C:\ProgramData\chocolatey\bin",
             "C:\Program Files\poppler\bin",
-            "C:\Program Files (x86)\poppler\bin"
+            "C:\Program Files (x86)\poppler\bin",
+            "C:\tools\poppler\bin"
         )
 
         $pdftotextExe = $null
@@ -365,9 +370,9 @@ function Install-Poppler {
                 $env:Path = "$popplerDir;$env:Path"
             }
             if ($alreadyInstalled) {
-                Write-Success "poppler was already installed (found at: $($pdftotextExe.FullName))"
+                Write-Success "poppler-utils was already installed (found at: $($pdftotextExe.FullName))"
             } else {
-                Write-Success "poppler installed successfully (found at: $($pdftotextExe.FullName))"
+                Write-Success "poppler-utils installed successfully (found at: $($pdftotextExe.FullName))"
             }
             return $true
         }
@@ -376,14 +381,14 @@ function Install-Poppler {
         $pdftotext = Get-Command pdftotext -ErrorAction SilentlyContinue
         if ($pdftotext) {
             if ($alreadyInstalled) {
-                Write-Success "poppler was already installed and is now in PATH"
+                Write-Success "poppler-utils was already installed and is now in PATH"
             } else {
-                Write-Success "poppler installed successfully"
+                Write-Success "poppler-utils installed successfully"
             }
             return $true
         }
 
-        Write-Warning "poppler installed but pdftotext not found in PATH. A restart may be required."
+        Write-Warning "poppler-utils installed but pdftotext not found in PATH. A restart may be required."
         $script:InstallFailed += "poppler"
         return $false
     } catch {
