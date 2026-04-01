@@ -455,7 +455,17 @@ $BLOCK_END"
     echo "$ENV_BLOCK" >> "$SHELL_CONFIG_PATH"
 
     print_success "Privacy settings added to $SHELL_CONFIG"
-    print_status "Run 'source $SHELL_CONFIG' to apply changes to current session"
+
+    # Auto-source the configuration to apply to current shell
+    print_status "Applying environment variables to current shell..."
+    source "$SHELL_CONFIG_PATH" 2>/dev/null || true
+
+    # Verify they were applied
+    if [[ -n "$DISABLE_TELEMETRY" ]]; then
+        print_success "Environment variables applied to current session"
+    else
+        print_status "Run 'source $SHELL_CONFIG' to apply changes to current session"
+    fi
 }
 
 # Configure Claude settings (auto-compact)
