@@ -383,40 +383,50 @@ configure_privacy() {
     print_header "Configuring Privacy Settings"
 
     local SHELL_CONFIG=""
+    local SHELL_CONFIG_PATH=""
     if [[ -f ~/.bashrc ]]; then
         SHELL_CONFIG="~/.bashrc"
+        SHELL_CONFIG_PATH="$HOME/.bashrc"
     elif [[ -f ~/.zshrc ]]; then
         SHELL_CONFIG="~/.zshrc"
+        SHELL_CONFIG_PATH="$HOME/.zshrc"
     elif [[ -f ~/.bash_profile ]]; then
         SHELL_CONFIG="~/.bash_profile"
+        SHELL_CONFIG_PATH="$HOME/.bash_profile"
     else
         SHELL_CONFIG="~/.profile"
+        SHELL_CONFIG_PATH="$HOME/.profile"
     fi
 
     print_status "Shell config file: $SHELL_CONFIG"
 
-    # Build the environment variable block
+    # Build the environment variable block with markers for idempotent updates
+    local BLOCK_START="# >>> Claude Code Configuration START"
+    local BLOCK_END="# <<< Claude Code Configuration END"
     local ENV_BLOCK=""
 
     if $FULL_PRIVACY; then
-        ENV_BLOCK="# Claude Code Maximum Privacy Settings
+        ENV_BLOCK="$BLOCK_START
+# Claude Code Maximum Privacy Settings
 export DISABLE_TELEMETRY=1
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export OTEL_LOG_USER_PROMPTS=0
 export OTEL_LOG_TOOL_DETAILS=0
-"
+
+# Claude Code Token Optimization
+export CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000
+$BLOCK_END"
         print_status "Configuring MAXIMUM privacy mode"
     else
-        ENV_BLOCK="# Claude Code Privacy Settings
+        ENV_BLOCK="$BLOCK_START
+# Claude Code Privacy Settings
 export DISABLE_TELEMETRY=1
-"
+
+# Claude Code Token Optimization
+export CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000
+$BLOCK_END"
         print_status "Configuring standard privacy mode"
     fi
-
-    # Add token optimization variables
-    ENV_BLOCK+="# Claude Code Token Optimization
-export CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000
-"
 
     if $DRY_RUN; then
         echo "[DRY-RUN] Would add to $SHELL_CONFIG:"
@@ -424,19 +434,25 @@ export CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000
         return 0
     fi
 
-    # Check if already configured
-    if grep -q "DISABLE_TELEMETRY=1" ~/${SHELL_CONFIG##*/} 2>/dev/null; then
-        print_warning "Privacy settings already appear to be configured in $SHELL_CONFIG"
-        read -p "Update anyway? (y/N) " -n 1 -r
+    # Check if already configured (look for our marker)
+    if grep -q "$BLOCK_START" "$SHELL_CONFIG_PATH" 2>/dev/null; then
+        print_warning "Claude Code settings already configured in $SHELL_CONFIG"
+        read -p "Replace existing configuration? (y/N) " -n 1 -r
         echo ""
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             return 0
         fi
+
+        # Remove old block (everything between START and END markers)
+        local TEMP_FILE=$(mktemp)
+        sed "/$BLOCK_START/,/$BLOCK_END/d" "$SHELL_CONFIG_PATH" > "$TEMP_FILE"
+        mv "$TEMP_FILE" "$SHELL_CONFIG_PATH"
+        print_status "Removed old configuration from $SHELL_CONFIG"
     fi
 
-    # Append to shell config
-    echo "" >> ~/${SHELL_CONFIG##*/}
-    echo "$ENV_BLOCK" >> ~/${SHELL_CONFIG##*/}
+    # Append new block
+    echo "" >> "$SHELL_CONFIG_PATH"
+    echo "$ENV_BLOCK" >> "$SHELL_CONFIG_PATH"
 
     print_success "Privacy settings added to $SHELL_CONFIG"
     print_status "Run 'source $SHELL_CONFIG' to apply changes to current session"
@@ -704,15 +720,34 @@ verify_env_vars() {
         SHELL_CONFIG="$HOME/.profile"
     fi
 
+    local BLOCK_START="# >>> Claude Code Configuration START"
+    local BLOCK_END="# <<< Claude Code Configuration END"
+
     print_status "Checking $SHELL_CONFIG for Claude Code environment variables..."
     echo ""
 
-    # Show what's in the shell config
-    if grep -q "DISABLE_TELEMETRY" "$SHELL_CONFIG" 2>/dev/null; then
-        print_success "Found privacy settings in $SHELL_CONFIG:"
+    # Check for new block format
+    if grep -q "$BLOCK_START" "$SHELL_CONFIG" 2>/dev/null; then
+        print_success "Found Claude Code configuration block in $SHELL_CONFIG"
+        echo ""
+        print_status "Configuration block contents:"
+        sed -n "/$BLOCK_START/,/$BLOCK_END/p" "$SHELL_CONFIG" 2>/dev/null
+
+        # Check for duplicates (multiple START markers)
+        local BLOCK_COUNT=$(grep -c "$BLOCK_START" "$SHELL_CONFIG" 2>/dev/null || echo "0")
+        if [[ "$BLOCK_COUNT" -gt 1 ]]; then
+            print_warning "Detected $BLOCK_COUNT configuration blocks (possible duplicates)"
+            print_status "Run the script with --reduced-privacy or --full-privacy to clean up and reconfigure"
+        fi
+    elif grep -q "DISABLE_TELEMETRY" "$SHELL_CONFIG" 2>/dev/null; then
+        # Legacy format without markers
+        print_warning "Found legacy configuration (without block markers) in $SHELL_CONFIG"
+        print_status "Consider running the script to update to the new idempotent format"
+        echo ""
+        print_status "Legacy settings found:"
         grep -E "^(export DISABLE_TELEMETRY|export CLAUDE_CODE_DISABLE|export OTEL_LOG|export CLAUDE_CODE_AUTO_COMPACT)" "$SHELL_CONFIG" 2>/dev/null | head -10
     else
-        print_warning "No privacy settings found in $SHELL_CONFIG"
+        print_warning "No Claude Code settings found in $SHELL_CONFIG"
         print_status "Run the script without --dry-run to configure environment variables"
     fi
 
