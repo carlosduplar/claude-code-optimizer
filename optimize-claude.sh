@@ -520,8 +520,12 @@ JSONEOF
 create_claude_md() {
     print_header "Creating CLAUDE.md Template"
 
-    if [[ -f "CLAUDE.md" ]]; then
-        print_warning "CLAUDE.md already exists in current directory"
+    # Target user-level .claude directory
+    local CLAUDE_DIR="${HOME}/.claude"
+    local CLAUDE_MD="${CLAUDE_DIR}/CLAUDE.md"
+
+    if [[ -f "$CLAUDE_MD" ]]; then
+        print_warning "CLAUDE.md already exists at $CLAUDE_MD"
         read -p "Overwrite? (y/N) " -n 1 -r
         echo ""
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -530,11 +534,14 @@ create_claude_md() {
     fi
 
     if $DRY_RUN; then
-        echo "[DRY-RUN] Would create CLAUDE.md in current directory"
+        echo "[DRY-RUN] Would create CLAUDE.md at $CLAUDE_MD"
         return 0
     fi
 
-    cat > "CLAUDE.md" << 'EOF'
+    # Ensure .claude directory exists
+    mkdir -p "$CLAUDE_DIR"
+
+    cat > "$CLAUDE_MD" << 'EOF'
 # Claude Code Optimization Guide
 
 ## Cost-First Defaults
@@ -581,25 +588,7 @@ The Anthropic API has a **5-minute TTL** on prompt cache entries. After 5 minute
 - Cache is evicted (10x cost increase!)
 - 200K context goes from $0.60 to $6.00 per request
 
-**Use the keepalive script:**
-```bash
-# In another terminal, while Claude is running
-./claude-keepalive.sh &
-```
-
-Or manually keep cache warm:
-```
-# Send a no-op message every 4 minutes
-/loop --interval 240s echo "keepalive"
-```
-
-## Model Selection Strategy
-| Model | Input | Output | Use For |
-|-------|-------|--------|---------|
-| Haiku 3.5 | $0.80 | $4 | Quick tasks, searches |
-| Sonnet 4.x | $3 | $15 | General development |
-| Opus 4.5 | $5 | $25 | Complex architecture |
-| Opus 4.6 Fast | $30 | $150 | Emergency only |
+The keepalive hook is automatically configured in `.claude/settings.json` to keep the cache warm.
 
 ## Daily Checklist
 - [ ] Set appropriate model for the task
@@ -607,15 +596,14 @@ Or manually keep cache warm:
 - [ ] Set token budgets (+500k) for large tasks
 - [ ] Run `/compact` at 150K tokens
 - [ ] Pre-convert binary documents
-- [ ] Start keepalive script for long sessions
 EOF
 
-    print_success "Created CLAUDE.md in current directory"
+    print_success "Created CLAUDE.md at $CLAUDE_MD"
 }
 
-# Create keepalive script
+# Create keepalive script (optional - hooks handle this automatically)
 create_keepalive_script() {
-    print_header "Creating Prompt Cache Keepalive Script"
+    print_header "Creating Prompt Cache Keepalive Script (Optional)"
 
     local KEEPALIVE_SCRIPT="claude-keepalive.sh"
 
@@ -645,6 +633,9 @@ create_keepalive_script() {
 # The Anthropic API has a 5-minute TTL on prompt cache entries.
 # After 5 minutes of inactivity, cache is evicted and costs increase 10x.
 # For 200K context: $0.60 → $6.00 per request
+#
+# Note: This script is optional. The PostToolUse hook in .claude/settings.json
+# already handles cache keepalive automatically.
 #
 
 SESSION_NAME="${1:-claude}"
@@ -725,9 +716,8 @@ EOF
 
     chmod +x "$KEEPALIVE_SCRIPT"
 
-    print_success "Created $KEEPALIVE_SCRIPT"
-    print_status "Usage: ./$KEEPALIVE_SCRIPT [tmux-session-name] &"
-    print_status "Run this in the background while Claude Code is active"
+    print_success "Created optional keepalive script: $KEEPALIVE_SCRIPT"
+    print_status "Note: Hooks in .claude/settings.json already handle cache keepalive automatically"
 }
 
 # Create settings.json with keepalive hook
@@ -817,8 +807,7 @@ main() {
     echo "1. Review the changes to your shell config"
     echo "2. Run: source ~/.bashrc (or ~/.zshrc)"
     echo "3. Start Claude Code with optimized settings"
-    echo "4. For long sessions, run: ./claude-keepalive.sh &"
-    echo "5. Check /cost regularly to monitor usage"
+    echo "4. Check /cost regularly to monitor usage"
     echo ""
 
     if $FULL_PRIVACY; then
@@ -828,7 +817,7 @@ main() {
     fi
 
     echo ""
-    echo -e "${BOLD}Cache Keepalive:${NC} Run ./claude-keepalive.sh in background for sessions >5 min"
+    echo -e "${BOLD}Hooks configured:${NC} Auto-compact, image pre-processing, cache keepalive"
     echo ""
 
     print_success "Happy optimizing!"
