@@ -178,28 +178,26 @@ function Test-Poppler {
     }
 
     # Check common installation paths and add to PATH if found
-    $popplerBasePath = "C:\ProgramData\chocolatey\lib\poppler\tools"
-    if (Test-Path $popplerBasePath) {
-        # Look for pdftotext.exe in any subdirectory
-        $pdftotextExe = Get-ChildItem -Path $popplerBasePath -Recurse -Filter "pdftotext.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($pdftotextExe) {
-            $popplerDir = $pdftotextExe.DirectoryName
-            if ($env:Path -notlike "*$popplerDir*") {
-                $env:Path = "$popplerDir;$env:Path"
-            }
-            Write-Success "poppler (pdftotext) found and added to PATH"
-            return $true
-        }
-    }
+    $popplerPaths = @(
+        "C:\ProgramData\chocolatey\lib\poppler\tools",
+        "C:\ProgramData\chocolatey\bin",
+        "C:\Program Files\poppler\bin",
+        "C:\Program Files (x86)\poppler\bin"
+    )
 
-    # Fallback: check chocolatey bin directory
-    $chocoBin = "C:\ProgramData\chocolatey\bin"
-    if (Test-Path "$chocoBin\pdftotext.exe") {
-        if ($env:Path -notlike "*$chocoBin*") {
-            $env:Path = "$chocoBin;$env:Path"
+    foreach ($basePath in $popplerPaths) {
+        if (Test-Path $basePath) {
+            # Look for pdftotext.exe in this directory and subdirectories
+            $pdftotextExe = Get-ChildItem -Path $basePath -Recurse -Filter "pdftotext.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($pdftotextExe) {
+                $popplerDir = $pdftotextExe.DirectoryName
+                if ($env:Path -notlike "*$popplerDir*") {
+                    $env:Path = "$popplerDir;$env:Path"
+                }
+                Write-Success "poppler (pdftotext) found at $($pdftotextExe.FullName) and added to PATH"
+                return $true
+            }
         }
-        Write-Success "poppler (pdftotext) found in chocolatey bin"
-        return $true
     }
 
     Write-Warning "poppler (pdftotext) is not installed"
@@ -336,16 +334,28 @@ function Install-Poppler {
     }
 
     try {
-        choco install poppler -y
-
+        $chocoOutput = choco install poppler -y 2>&1
+        
+        # Check if already installed (choco returns success but with warning)
+        $alreadyInstalled = $chocoOutput -match "already installed"
+        
         # Refresh environment variables from registry
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 
         # Search for pdftotext.exe in poppler installation directory
-        $popplerBasePath = "C:\ProgramData\chocolatey\lib\poppler\tools"
+        $popplerPaths = @(
+            "C:\ProgramData\chocolatey\lib\poppler\tools",
+            "C:\ProgramData\chocolatey\bin",
+            "C:\Program Files\poppler\bin",
+            "C:\Program Files (x86)\poppler\bin"
+        )
+
         $pdftotextExe = $null
-        if (Test-Path $popplerBasePath) {
-            $pdftotextExe = Get-ChildItem -Path $popplerBasePath -Recurse -Filter "pdftotext.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        foreach ($basePath in $popplerPaths) {
+            if (Test-Path $basePath) {
+                $pdftotextExe = Get-ChildItem -Path $basePath -Recurse -Filter "pdftotext.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($pdftotextExe) { break }
+            }
         }
 
         # If found, add to PATH for this session
@@ -354,14 +364,22 @@ function Install-Poppler {
             if ($env:Path -notlike "*$popplerDir*") {
                 $env:Path = "$popplerDir;$env:Path"
             }
-            Write-Success "poppler installed successfully (found at: $($pdftotextExe.FullName))"
+            if ($alreadyInstalled) {
+                Write-Success "poppler was already installed (found at: $($pdftotextExe.FullName))"
+            } else {
+                Write-Success "poppler installed successfully (found at: $($pdftotextExe.FullName))"
+            }
             return $true
         }
 
         # Try command lookup as fallback
         $pdftotext = Get-Command pdftotext -ErrorAction SilentlyContinue
         if ($pdftotext) {
-            Write-Success "poppler installed successfully"
+            if ($alreadyInstalled) {
+                Write-Success "poppler was already installed and is now in PATH"
+            } else {
+                Write-Success "poppler installed successfully"
+            }
             return $true
         }
 
