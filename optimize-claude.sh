@@ -797,12 +797,24 @@ main() {
         echo ""
     fi
 
+    # Auto-source the shell config to apply changes immediately
+    local SHELL_CONFIG=""
+    if [[ -f ~/.bashrc ]]; then
+        SHELL_CONFIG="~/.bashrc"
+        source ~/.bashrc 2>/dev/null || true
+    elif [[ -f ~/.zshrc ]]; then
+        SHELL_CONFIG="~/.zshrc"
+        source ~/.zshrc 2>/dev/null || true
+    fi
+
     echo -e "${BOLD}Next steps:${NC}"
-    echo "1. Review the changes to your shell config"
-    echo "2. Run: source ~/.bashrc (or ~/.zshrc)"
-    echo "3. Start Claude Code with optimized settings"
-    echo "4. Check /cost regularly to monitor usage"
+    echo "1. Start Claude Code with optimized settings"
+    echo "2. Check /cost regularly to monitor usage"
     echo ""
+
+    if [[ -n "$SHELL_CONFIG" ]]; then
+        print_success "Environment variables applied from $SHELL_CONFIG"
+    fi
 
     if $FULL_PRIVACY; then
         echo -e "${BOLD}Privacy mode:${NC} Maximum (all non-essential traffic disabled)"
