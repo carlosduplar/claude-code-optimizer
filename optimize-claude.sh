@@ -26,6 +26,7 @@ FULL_PRIVACY=true
 REDUCED_PRIVACY=false
 DRY_RUN=false
 SKIP_DEPS=false
+VERIFY_ONLY=false
 
 # Dependency tracking
 MISSING_DEPS=()
@@ -65,12 +66,14 @@ OPTIONS:
     --reduced-privacy Use reduced privacy (telemetry disabled only, keeps auto-updates)
     --dry-run         Show what would be done without making changes
     --skip-deps       Skip dependency installation
+    --verify          Verify current environment variable configuration
     --help            Show this help message
 
 EXAMPLES:
     $0                    # Full privacy mode (default)
     $0 --reduced-privacy  # Reduced privacy (standard telemetry disabled)
     $0 --dry-run          # Preview changes
+    $0 --verify           # Check current env var configuration
 
 This script will:
   1. Check for required dependencies (markitdown, imagemagick, poppler)
@@ -96,6 +99,10 @@ parse_args() {
                 ;;
             --skip-deps)
                 SKIP_DEPS=true
+                shift
+                ;;
+            --verify)
+                VERIFY_ONLY=true
                 shift
                 ;;
             --help|-h)
@@ -682,11 +689,55 @@ EOF
     print_status "The PostToolUse hook fires after every tool use, keeping cache warm"
 }
 
+# Verify environment variables
+verify_env_vars() {
+    print_header "Verifying Environment Variables"
+
+    local SHELL_CONFIG=""
+    if [[ -f ~/.bashrc ]]; then
+        SHELL_CONFIG="$HOME/.bashrc"
+    elif [[ -f ~/.zshrc ]]; then
+        SHELL_CONFIG="$HOME/.zshrc"
+    elif [[ -f ~/.bash_profile ]]; then
+        SHELL_CONFIG="$HOME/.bash_profile"
+    else
+        SHELL_CONFIG="$HOME/.profile"
+    fi
+
+    print_status "Checking $SHELL_CONFIG for Claude Code environment variables..."
+    echo ""
+
+    # Show what's in the shell config
+    if grep -q "DISABLE_TELEMETRY" "$SHELL_CONFIG" 2>/dev/null; then
+        print_success "Found privacy settings in $SHELL_CONFIG:"
+        grep -E "^(export DISABLE_TELEMETRY|export CLAUDE_CODE_DISABLE|export OTEL_LOG|export CLAUDE_CODE_AUTO_COMPACT)" "$SHELL_CONFIG" 2>/dev/null | head -10
+    else
+        print_warning "No privacy settings found in $SHELL_CONFIG"
+        print_status "Run the script without --dry-run to configure environment variables"
+    fi
+
+    echo ""
+    print_status "Current shell environment (may differ until you source the config):"
+    echo "  DISABLE_TELEMETRY=${DISABLE_TELEMETRY:-<not set>}"
+    echo "  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-<not set>}"
+    echo "  CLAUDE_CODE_AUTO_COMPACT_WINDOW=${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-<not set>}"
+
+    echo ""
+    print_status "To apply environment variables to your current shell, run:"
+    echo "  source $SHELL_CONFIG"
+}
+
 # Main function
 main() {
     print_header "Claude Code Token Optimizer & Privacy Enhancer"
 
     parse_args "$@"
+
+    # Handle verify-only mode
+    if $VERIFY_ONLY; then
+        verify_env_vars
+        exit 0
+    fi
 
     if $DRY_RUN; then
         print_warning "DRY RUN MODE - No changes will be made"
@@ -710,24 +761,19 @@ main() {
         echo ""
     fi
 
-    # Auto-source the shell config to apply changes immediately
+    # Detect which shell config was modified
     local SHELL_CONFIG=""
     if [[ -f ~/.bashrc ]]; then
-        SHELL_CONFIG="~/.bashrc"
-        source ~/.bashrc 2>/dev/null || true
+        SHELL_CONFIG="$HOME/.bashrc"
     elif [[ -f ~/.zshrc ]]; then
-        SHELL_CONFIG="~/.zshrc"
-        source ~/.zshrc 2>/dev/null || true
+        SHELL_CONFIG="$HOME/.zshrc"
     fi
 
     echo -e "${BOLD}Next steps:${NC}"
-    echo "1. Start Claude Code with optimized settings"
-    echo "2. Check /cost regularly to monitor usage"
+    echo "1. Run: source $SHELL_CONFIG  (to apply env vars to current shell)"
+    echo "2. Restart Claude Code"
+    echo "3. Check /cost regularly to monitor usage"
     echo ""
-
-    if [[ -n "$SHELL_CONFIG" ]]; then
-        print_success "Environment variables applied from $SHELL_CONFIG"
-    fi
 
     if $FULL_PRIVACY; then
         echo -e "${BOLD}Privacy mode:${NC} Maximum (all non-essential traffic disabled)"
@@ -738,6 +784,9 @@ main() {
     echo ""
     echo -e "${BOLD}Hooks configured:${NC} Auto-compact, image pre-processing, cache keepalive"
     echo ""
+
+    # Show verification
+    verify_env_vars
 
     print_success "Happy optimizing!"
 }
