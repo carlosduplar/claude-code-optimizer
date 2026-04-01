@@ -79,7 +79,7 @@ function Write-Header {
     param([string]$Message)
     Write-Host ""
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor $Colors.Header
-    Write-Host " $Message" -ForegroundColor $Colors.Header -Bold
+    Write-Host " $Message" -ForegroundColor $Colors.Header
     Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor $Colors.Header
     Write-Host ""
 }
@@ -92,7 +92,7 @@ function Test-Administrator {
 }
 
 # Check for Python
-tunction Test-Python {
+function Test-Python {
     Write-Status "Checking Python installation..."
 
     $python = Get-Command python -ErrorAction SilentlyContinue
@@ -115,7 +115,7 @@ tunction Test-Python {
 }
 
 # Check for pip
-tunction Test-Pip {
+function Test-Pip {
     $pip = Get-Command pip -ErrorAction SilentlyContinue
     $pip3 = Get-Command pip3 -ErrorAction SilentlyContinue
 
@@ -128,7 +128,7 @@ tunction Test-Pip {
 }
 
 # Check for markitdown
-tunction Test-Markitdown {
+function Test-Markitdown {
     Write-Status "Checking markitdown..."
 
     $markitdown = Get-Command markitdown -ErrorAction SilentlyContinue
@@ -150,7 +150,7 @@ tunction Test-Markitdown {
 }
 
 # Check for ImageMagick
-tunction Test-ImageMagick {
+function Test-ImageMagick {
     Write-Status "Checking ImageMagick..."
 
     $magick = Get-Command magick -ErrorAction SilentlyContinue
@@ -167,23 +167,48 @@ tunction Test-ImageMagick {
 }
 
 # Check for poppler
-tunction Test-Poppler {
+function Test-Poppler {
     Write-Status "Checking poppler (pdftotext)..."
 
+    # First check if pdftotext is in PATH
     $pdftotext = Get-Command pdftotext -ErrorAction SilentlyContinue
-
     if ($pdftotext) {
         Write-Success "poppler (pdftotext) is already installed"
         return $true
-    } else {
-        Write-Warning "poppler (pdftotext) is not installed"
-        $script:MissingDeps += "poppler"
-        return $false
     }
+
+    # Check common installation paths and add to PATH if found
+    $popplerBasePath = "C:\ProgramData\chocolatey\lib\poppler\tools"
+    if (Test-Path $popplerBasePath) {
+        # Look for pdftotext.exe in any subdirectory
+        $pdftotextExe = Get-ChildItem -Path $popplerBasePath -Recurse -Filter "pdftotext.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($pdftotextExe) {
+            $popplerDir = $pdftotextExe.DirectoryName
+            if ($env:Path -notlike "*$popplerDir*") {
+                $env:Path = "$popplerDir;$env:Path"
+            }
+            Write-Success "poppler (pdftotext) found and added to PATH"
+            return $true
+        }
+    }
+
+    # Fallback: check chocolatey bin directory
+    $chocoBin = "C:\ProgramData\chocolatey\bin"
+    if (Test-Path "$chocoBin\pdftotext.exe") {
+        if ($env:Path -notlike "*$chocoBin*") {
+            $env:Path = "$chocoBin;$env:Path"
+        }
+        Write-Success "poppler (pdftotext) found in chocolatey bin"
+        return $true
+    }
+
+    Write-Warning "poppler (pdftotext) is not installed"
+    $script:MissingDeps += "poppler"
+    return $false
 }
 
 # Install markitdown
-tunction Install-Markitdown {
+function Install-Markitdown {
     Write-Status "Installing markitdown..."
 
     if ($DryRun) {
@@ -218,7 +243,7 @@ tunction Install-Markitdown {
 }
 
 # Install ImageMagick via winget
-tunction Install-ImageMagick {
+function Install-ImageMagick {
     Write-Status "Installing ImageMagick via winget..."
 
     if ($DryRun) {
@@ -254,7 +279,7 @@ tunction Install-ImageMagick {
 }
 
 # Install ImageMagick via Chocolatey
-tunction Install-ImageMagick-Choco {
+function Install-ImageMagick-Choco {
     $choco = Get-Command choco -ErrorAction SilentlyContinue
 
     if (-not $choco) {
@@ -293,7 +318,7 @@ tunction Install-ImageMagick-Choco {
 }
 
 # Install poppler via Chocolatey
-tunction Install-Poppler {
+function Install-Poppler {
     Write-Status "Installing poppler via Chocolatey..."
 
     $choco = Get-Command choco -ErrorAction SilentlyContinue
@@ -313,18 +338,36 @@ tunction Install-Poppler {
     try {
         choco install poppler -y
 
-        # Refresh environment variables
+        # Refresh environment variables from registry
         $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 
+        # Search for pdftotext.exe in poppler installation directory
+        $popplerBasePath = "C:\ProgramData\chocolatey\lib\poppler\tools"
+        $pdftotextExe = $null
+        if (Test-Path $popplerBasePath) {
+            $pdftotextExe = Get-ChildItem -Path $popplerBasePath -Recurse -Filter "pdftotext.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+
+        # If found, add to PATH for this session
+        if ($pdftotextExe) {
+            $popplerDir = $pdftotextExe.DirectoryName
+            if ($env:Path -notlike "*$popplerDir*") {
+                $env:Path = "$popplerDir;$env:Path"
+            }
+            Write-Success "poppler installed successfully (found at: $($pdftotextExe.FullName))"
+            return $true
+        }
+
+        # Try command lookup as fallback
         $pdftotext = Get-Command pdftotext -ErrorAction SilentlyContinue
         if ($pdftotext) {
             Write-Success "poppler installed successfully"
             return $true
-        } else {
-            Write-Error "poppler installation may have failed or requires restart"
-            $script:InstallFailed += "poppler"
-            return $false
         }
+
+        Write-Warning "poppler installed but pdftotext not found in PATH. A restart may be required."
+        $script:InstallFailed += "poppler"
+        return $false
     } catch {
         Write-Error "Failed to install poppler: $_"
         $script:InstallFailed += "poppler"
@@ -333,7 +376,7 @@ tunction Install-Poppler {
 }
 
 # Check and install all dependencies
-tunction Install-Dependencies {
+function Install-Dependencies {
     if ($SkipDeps) {
         Write-Status "Skipping dependency check (-SkipDeps specified)"
         return
@@ -391,27 +434,32 @@ tunction Install-Dependencies {
 }
 
 # Configure privacy environment variables
-tunction Set-PrivacyConfiguration {
+function Set-PrivacyConfiguration {
     Write-Header "Configuring Privacy Settings"
 
     # Determine target profile script
+    $docsPath = [Environment]::GetFolderPath("MyDocuments")
     $profilePaths = @(
         $PROFILE.CurrentUserAllHosts,
         $PROFILE.CurrentUserCurrentHost,
-        [Environment]::GetFolderPath("MyDocuments") + "\PowerShell\Microsoft.PowerShell_profile.ps1",
-        [Environment]::GetFolderPath("MyDocuments") + "\WindowsPowerShell\Microsoft.PowerShell_profile.ps1"
+        "$docsPath\PowerShell\Microsoft.PowerShell_profile.ps1",
+        "$docsPath\WindowsPowerShell\Microsoft.PowerShell_profile.ps1"
     )
 
     $targetProfile = $null
     foreach ($path in $profilePaths) {
-        if ($path -and (Test-Path (Split-Path $path -Parent))) {
-            $targetProfile = $path
-            break
+        if ($path -and (Split-Path $path -Leaf) -match '\.ps1$') {
+            $parentDir = Split-Path $path -Parent
+            if ($parentDir -and (Test-Path $parentDir)) {
+                $targetProfile = $path
+                break
+            }
         }
     }
 
+    # Fallback to default if no valid profile found
     if (-not $targetProfile) {
-        $targetProfile = $PROFILE.CurrentUserAllHosts
+        $targetProfile = "$docsPath\PowerShell\Microsoft.PowerShell_profile.ps1"
         $profileDir = Split-Path $targetProfile -Parent
         if (-not (Test-Path $profileDir)) {
             New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
@@ -452,7 +500,7 @@ tunction Set-PrivacyConfiguration {
 "@
 
     if ($DryRun) {
-        Write-Host "[DRY-RUN] Would add to $targetProfile:"
+        Write-Host "[DRY-RUN] Would add to ${targetProfile}:"
         Write-Host $envBlock
         return
     }
@@ -460,7 +508,7 @@ tunction Set-PrivacyConfiguration {
     # Check if already configured
     if (Test-Path $targetProfile) {
         $content = Get-Content $targetProfile -Raw
-        if ($content -match "DISABLE_TELEMISTRY=1") {
+        if ($content -match "DISABLE_TELEMETRY=1") {
             Write-Warning "Privacy settings already appear to be configured in profile"
             $update = Read-Host "Update anyway? (y/N)"
             if ($update -notmatch '^[Yy]$') {
@@ -477,7 +525,7 @@ tunction Set-PrivacyConfiguration {
 }
 
 # Also set in Windows environment for GUI applications
-tunction Set-WindowsEnvironment {
+function Set-WindowsEnvironment {
     Write-Header "Configuring Windows Environment Variables"
 
     if ($DryRun) {
@@ -501,7 +549,7 @@ tunction Set-WindowsEnvironment {
 }
 
 # Configure Claude settings (auto-compact)
-tunction Set-ClaudeConfiguration {
+function Set-ClaudeConfiguration {
     Write-Header "Configuring Claude Code Settings"
 
     $claudeDir = Join-Path $env:USERPROFILE ".claude"
@@ -544,7 +592,7 @@ tunction Set-ClaudeConfiguration {
 }
 
 # Create new Claude config
-tunction Create-NewClaudeConfig {
+function Create-NewClaudeConfig {
     param([string]$Path)
 
     Write-Status "Creating new Claude config: $Path"
@@ -570,7 +618,7 @@ tunction Create-NewClaudeConfig {
 }
 
 # Create CLAUDE.md template
-tunction New-ClaudeMdTemplate {
+function New-ClaudeMdTemplate {
     Write-Header "Creating CLAUDE.md Template"
 
     $claudeMd = Join-Path $PWD "CLAUDE.md"
@@ -692,7 +740,7 @@ magick.exe input.jpg -resize 2000x2000 -quality 85 output.jpg
 }
 
 # Create a batch file for easy pre-processing
-tunction New-PreprocessScript {
+function New-PreprocessScript {
     Write-Header "Creating Pre-Processing Helper Scripts"
 
     $batchFile = Join-Path $PWD "preprocess-for-claude.bat"
@@ -834,7 +882,7 @@ if ($Batch) {
 }
 
 # Create keepalive script
-tunction New-KeepaliveScript {
+function New-KeepaliveScript {
     Write-Header "Creating Prompt Cache Keepalive Script"
 
     $keepaliveFile = Join-Path $PWD "claude-keepalive.ps1"
@@ -848,7 +896,7 @@ tunction New-KeepaliveScript {
     }
 
     if ($DryRun) {
-        Write-Host "[DRY-RUN] Would create $keepaliveFile"
+        Write-Host "[DRY-RUN] Would create ${keepaliveFile}"
         return
     }
 
@@ -965,7 +1013,7 @@ while ($script:Running) {
 }
 
 # Create settings.json with keepalive hook
-tunction New-SettingsJson {
+function New-SettingsJson {
     Write-Header "Creating settings.json with Keepalive Hook"
 
     $settingsDir = Join-Path $PWD ".claude"
@@ -1030,7 +1078,7 @@ tunction New-SettingsJson {
 }
 
 # Main execution
-tunction Main {
+function Main {
     Write-Header "Claude Code Token Optimizer & Privacy Enhancer (Windows)"
 
     if (-not (Test-Administrator)) {
@@ -1065,7 +1113,7 @@ tunction Main {
         Write-Host ""
     }
 
-    Write-Host "Next steps:" -Bold
+    Write-Host "Next steps:"
     Write-Host "1. Review the environment variables in your PowerShell profile"
     Write-Host "2. Restart PowerShell or run: `$PROFILE"
     Write-Host "3. Start Claude Code with optimized settings"
