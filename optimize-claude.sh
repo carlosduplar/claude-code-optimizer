@@ -158,11 +158,9 @@ check_python() {
 check_markitdown() {
     if command_exists markitdown || $PYTHON_CMD -c "import markitdown" 2>/dev/null; then
         print_success "markitdown is already installed"
-        return 0
     else
         print_warning "markitdown is not installed"
         MISSING_DEPS+=("markitdown")
-        return 1
     fi
 }
 
@@ -170,11 +168,9 @@ check_markitdown() {
 check_imagemagick() {
     if command_exists magick || command_exists convert; then
         print_success "ImageMagick is already installed"
-        return 0
     else
         print_warning "ImageMagick is not installed"
         MISSING_DEPS+=("imagemagick")
-        return 1
     fi
 }
 
@@ -182,11 +178,9 @@ check_imagemagick() {
 check_poppler() {
     if command_exists pdftotext; then
         print_success "poppler (pdftotext) is already installed"
-        return 0
     else
         print_warning "poppler (pdftotext) is not installed"
         MISSING_DEPS+=("poppler")
-        return 1
     fi
 }
 
