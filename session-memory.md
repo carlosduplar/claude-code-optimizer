@@ -29,10 +29,10 @@ flowchart TB
     
     subgraph Storage["Storage Systems"]
         direction TB
-        S1[Session Memory<br/>~/.claude/projects/{cwd}/{sessionId}/session-memory/]
-        S2[Project Memory<br/>~/.claude/projects/{cwd}/memory/]
+        S1["Session Memory<br/>~/.claude/projects/{cwd}/{sessionId}/session-memory/"]
+        S2["Project Memory<br/>~/.claude/projects/{cwd}/memory/"]
         S3[History<br/>~/.claude/history.jsonl]
-        S4[Transcript<br/>~/.claude/projects/{cwd}/{sessionId}.jsonl]
+        S4["Transcript<br/>~/.claude/projects/{cwd}/{sessionId}.jsonl"]
     end
     
     subgraph Triggers["Compaction Triggers"]
@@ -226,7 +226,7 @@ flowchart TB
         M3[Assistant Response]
     end
     
-    subgraph Trigger{"Trigger Met?<br/>5K tokens + 3 tools"}
+    subgraph Trigger["Trigger Met?<br/>5K tokens + 3 tools"]
     end
     
     subgraph Extractor["Background Extraction Agent"]
