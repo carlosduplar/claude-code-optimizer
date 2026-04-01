@@ -812,4 +812,4 @@ This architecture is why Claude Code feels reliable even when the underlying API
 
 ---
 
-*Last updated: Based on Claude Code source analysis (src/services/api/claude.ts, src/services/api/withRetry.ts, src/utils/sideQuery.ts)*
+*based on alleged Claude Code source analysis (src/services/api/claude.ts, src/services/api/withRetry.ts, src/utils/sideQuery.ts)*

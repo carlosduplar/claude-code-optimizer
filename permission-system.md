@@ -880,4 +880,4 @@ This architecture balances security (fail-closed, defense-in-depth) with usabili
 
 ---
 
-*Last updated: Based on Claude Code source analysis (src/utils/permissions/yoloClassifier.ts, src/utils/permissions/permissions.ts, src/types/permissions.ts)*
+*based on alleged Claude Code source analysis (src/utils/permissions/yoloClassifier.ts, src/utils/permissions/permissions.ts, src/types/permissions.ts)*

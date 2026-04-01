@@ -684,4 +684,4 @@ Claude Code's context management is a sophisticated multi-layer system:
 
 ---
 
-*Last updated: Based on Claude Code source analysis (src/services/compact/, src/services/SessionMemory/, src/memdir/)*
+*based on alleged Claude Code source analysis (src/services/compact/, src/services/SessionMemory/, src/memdir/)*

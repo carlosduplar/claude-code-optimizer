@@ -635,4 +635,4 @@ The sheer scope of these features indicates Claude Code is a much larger platfor
 
 ---
 
-*Last updated: Based on Claude Code source analysis (src/main.tsx, src/entrypoints/cli.tsx, src/commands.ts, src/services/, src/utils/permissions/)*
+*based on alleged Claude Code source analysis (src/main.tsx, src/entrypoints/cli.tsx, src/commands.ts, src/services/, src/utils/permissions/)*

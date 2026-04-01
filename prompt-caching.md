@@ -305,4 +305,4 @@ This warns you when approaching the 5-minute idle threshold.
 
 ---
 
-*Last updated: Based on Claude Code source analysis and Anthropic API documentation*
+*based on alleged Claude Code source analysis and Anthropic API documentation*
