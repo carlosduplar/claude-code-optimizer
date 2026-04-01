@@ -211,7 +211,7 @@ When the model requests tool execution, the loop doesn't just execute and return
 
 ```mermaid
 flowchart TB
-    A[User: "fix bug"] --> B[Model: Read file.ts]
+    A["User: fix bug"] --> B["Model: Read file.ts"]
     B --> C[Execute Read Tool]
     C --> D[Add result to messages]
     D --> E[Continue queryLoop]
@@ -715,7 +715,7 @@ flowchart LR
     B --> C[queryLoop signal]
     C --> D[withRetry signal check]
     D --> E[getAnthropicClient signal]
-    E --> F[SDK: messages.create({signal})]
+    E --> F["SDK: messages.create({signal})"]
     F --> G[HTTP request abort]
 ```
 
