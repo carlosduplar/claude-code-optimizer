@@ -166,7 +166,7 @@ function Test-ImageMagick {
     }
 }
 
-# Check for poppler
+# Check for poppler (xpdf-utils provides pdftotext on Windows)
 function Test-Poppler {
     Write-Status "Checking poppler (pdftotext)..."
 
@@ -179,12 +179,12 @@ function Test-Poppler {
 
     # Check common installation paths and add to PATH if found
     $popplerPaths = @(
-        "C:\tools\poppler\bin",
-        "C:\ProgramData\chocolatey\lib\poppler-utils\tools",
-        "C:\ProgramData\chocolatey\lib\poppler\tools",
+        "C:\ProgramData\chocolatey\lib\xpdf-utils\tools",
+        "C:\ProgramData\chocolatey\lib\xpdf-utils\tools\xpdf-utils",
         "C:\ProgramData\chocolatey\bin",
-        "C:\Program Files\poppler\bin",
-        "C:\Program Files (x86)\poppler\bin"
+        "C:\Program Files\xpdf-utils",
+        "C:\Program Files (x86)\xpdf-utils",
+        "C:\tools\xpdf-utils"
     )
 
     foreach ($basePath in $popplerPaths) {
@@ -317,9 +317,9 @@ function Install-ImageMagick-Choco {
     }
 }
 
-# Install poppler via Chocolatey
+# Install poppler via Chocolatey (using xpdf-utils which provides pdftotext)
 function Install-Poppler {
-    Write-Status "Installing poppler via Chocolatey..."
+    Write-Status "Installing poppler (xpdf-utils) via Chocolatey..."
 
     $choco = Get-Command choco -ErrorAction SilentlyContinue
 
@@ -331,13 +331,13 @@ function Install-Poppler {
     }
 
     if ($DryRun) {
-        Write-Host "[DRY-RUN] Would run: choco install poppler-utils -y"
+        Write-Host "[DRY-RUN] Would run: choco install xpdf-utils -y"
         return $true
     }
 
     try {
-        # Try poppler-utils first (binary package)
-        $chocoOutput = choco install poppler-utils -y 2>&1
+        # Install xpdf-utils which provides pdftotext
+        $chocoOutput = choco install xpdf-utils -y 2>&1
         
         # Check if already installed
         $alreadyInstalled = $chocoOutput -match "already installed"
@@ -347,12 +347,11 @@ function Install-Poppler {
 
         # Search for pdftotext.exe in various locations
         $popplerPaths = @(
-            "C:\ProgramData\chocolatey\lib\poppler-utils\tools",
-            "C:\ProgramData\chocolatey\lib\poppler\tools",
+            "C:\ProgramData\chocolatey\lib\xpdf-utils\tools",
             "C:\ProgramData\chocolatey\bin",
-            "C:\Program Files\poppler\bin",
-            "C:\Program Files (x86)\poppler\bin",
-            "C:\tools\poppler\bin"
+            "C:\Program Files\xpdf-utils",
+            "C:\Program Files (x86)\xpdf-utils",
+            "C:\tools\xpdf-utils"
         )
 
         $pdftotextExe = $null
@@ -370,9 +369,9 @@ function Install-Poppler {
                 $env:Path = "$popplerDir;$env:Path"
             }
             if ($alreadyInstalled) {
-                Write-Success "poppler-utils was already installed (found at: $($pdftotextExe.FullName))"
+                Write-Success "xpdf-utils was already installed (found at: $($pdftotextExe.FullName))"
             } else {
-                Write-Success "poppler-utils installed successfully (found at: $($pdftotextExe.FullName))"
+                Write-Success "xpdf-utils installed successfully (found at: $($pdftotextExe.FullName))"
             }
             return $true
         }
@@ -381,14 +380,14 @@ function Install-Poppler {
         $pdftotext = Get-Command pdftotext -ErrorAction SilentlyContinue
         if ($pdftotext) {
             if ($alreadyInstalled) {
-                Write-Success "poppler-utils was already installed and is now in PATH"
+                Write-Success "xpdf-utils was already installed and is now in PATH"
             } else {
-                Write-Success "poppler-utils installed successfully"
+                Write-Success "xpdf-utils installed successfully"
             }
             return $true
         }
 
-        Write-Warning "poppler-utils installed but pdftotext not found in PATH. A restart may be required."
+        Write-Warning "xpdf-utils installed but pdftotext not found in PATH. A restart may be required."
         $script:InstallFailed += "poppler"
         return $false
     } catch {
