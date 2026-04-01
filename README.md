@@ -12,26 +12,26 @@ This repository documents **obscure, undocumented, and internal** aspects of Cla
 
 | Document | Description | Why Not in Official Docs |
 |----------|-------------|--------------------------|
-| [Query Flow & Message Streaming](docs/query-flow.md) | Streaming fallback layers, retry logic with exponential backoff + jitter, 529 error handling, side query architecture | Internal implementation details |
-| [Session Memory & Context Management](docs/session-memory.md) | Proactive/reactive compaction, memdir taxonomy, CACHED_MICROCOMPACT, REACTIVE_COMPACT feature flags | Internal memory system |
-| [Tool System Architecture](docs/tool-system.md) | Tool registration pipeline, MCP/LSP integration internals, permission context flow | Implementation details |
-| [Permission System & Auto-Mode Classifier](docs/permission-system.md) | Two-stage XML classifier, iron gate fail-closed logic, denial tracking circuit breakers | Internal security mechanisms |
-| [Skill & Plugin System](docs/skill-plugin-system.md) | Bundled skills registry, dynamic skill discovery, workflow scripts, MCP skill builders | Internal extension architecture |
-| [Prompt Caching & Keepalive](docs/prompt-caching.md) | 5-minute TTL behavior, cache invalidation triggers, CACHED_MICROCOMPACT, keepalive strategies | API-level cache internals |
+| [Query Flow & Message Streaming](query-flow.md) | Streaming fallback layers, retry logic with exponential backoff + jitter, 529 error handling, side query architecture | Internal implementation details |
+| [Session Memory & Context Management](session-memory.md) | Proactive/reactive compaction, memdir taxonomy, CACHED_MICROCOMPACT, REACTIVE_COMPACT feature flags | Internal memory system |
+| [Tool System Architecture](tool-system.md) | Tool registration pipeline, MCP/LSP integration internals, permission context flow | Implementation details |
+| [Permission System & Auto-Mode Classifier](permission-system.md) | Two-stage XML classifier, iron gate fail-closed logic, denial tracking circuit breakers | Internal security mechanisms |
+| [Skill & Plugin System](skill-plugin-system.md) | Bundled skills registry, dynamic skill discovery, workflow scripts, MCP skill builders | Internal extension architecture |
+| [Prompt Caching & Keepalive](prompt-caching.md) | 5-minute TTL behavior, cache invalidation triggers, CACHED_MICROCOMPACT, keepalive strategies | API-level cache internals |
 
 ### Hidden/Internal Features
 
 | Document | Description |
 |----------|-------------|
-| [Undocumented Features](docs/undocumented-features.md) | 88+ compile-time feature flags, hidden CLI flags, fast-path subcommands, 60+ internal environment variables |
-| [Anthropic-Only Commands](docs/ant-only-commands.md) | 24 commands gated behind `USER_TYPE=ant`—which work, which are stubs, side effects |
-| [Telemetry & Privacy Internals](docs/telemetry-privacy.md) | Datadog endpoints, 1P event logging schema, PII sanitization rules, proto column routing |
+| [Undocumented Features](undocumented-features.md) | 88+ compile-time feature flags, hidden CLI flags, fast-path subcommands, 60+ internal environment variables |
+| [Anthropic-Only Commands](ant-only-commands.md) | 24 commands gated behind `USER_TYPE=ant`—which work, which are stubs, side effects |
+| [Telemetry & Privacy Internals](telemetry-privacy.md) | Datadog endpoints, 1P event logging schema, PII sanitization rules, proto column routing |
 
 ### Practical Tools
 
 | Document | Description |
 |----------|-------------|
-| [Optimization Scripts](docs/optimization-scripts.md) | Automated setup scripts for token efficiency and privacy configuration |
+| [Optimization Scripts](optimization-scripts.md) | Automated setup scripts for token efficiency and privacy configuration |
 
 ---
 
@@ -86,7 +86,7 @@ Anthropic's API has a **5-minute TTL** on prompt cache entries. After 5 minutes 
 3. **`/loop` command:** Built-in for active tasks
 4. **Pre-flight warmup:** Small request after breaks
 
-See [prompt-caching.md](docs/prompt-caching.md) for implementation details.
+See [prompt-caching.md](prompt-caching.md) for implementation details.
 
 ### Hidden CLI Subcommands
 
@@ -118,7 +118,7 @@ Notable undocumented variables:
 | `ENABLE_PID_BASED_VERSION_LOCKING` | PID-based update locking |
 | `CLAUDE_CODE_COWORKER_TYPE` | Coworker type for telemetry |
 
-See [undocumented-features.md](docs/undocumented-features.md) for the full list.
+See [undocumented-features.md](undocumented-features.md) for the full list.
 
 ---
 
