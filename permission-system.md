@@ -125,13 +125,13 @@ Cycle order: `default` → `acceptEdits` → `plan` → `bypassPermissions` → 
 
 ```mermaid
 stateDiagram-v2
-    [*] --> default: Initial state
-    default --> acceptEdits: Shift+Tab
+    [*] --> Default: Initial state
+    Default --> acceptEdits: Shift+Tab
     acceptEdits --> plan: Shift+Tab
     plan --> bypassPermissions: Shift+Tab
     bypassPermissions --> auto: Shift+Tab
-    auto --> default: Shift+Tab
-    
+    auto --> Default: Shift+Tab
+
     note right of auto
         ant-only: skips
         acceptEdits & plan
