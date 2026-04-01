@@ -621,10 +621,12 @@ function Create-NewClaudeConfig {
 function New-ClaudeMdTemplate {
     Write-Header "Creating CLAUDE.md Template"
 
-    $claudeMd = Join-Path $PWD "CLAUDE.md"
+    # Target user-level .claude directory
+    $claudeDir = Join-Path $env:USERPROFILE ".claude"
+    $claudeMd = Join-Path $claudeDir "CLAUDE.md"
 
     if (Test-Path $claudeMd) {
-        Write-Warning "CLAUDE.md already exists in current directory"
+        Write-Warning "CLAUDE.md already exists at $claudeMd"
         $overwrite = Read-Host "Overwrite? (y/N)"
         if ($overwrite -notmatch '^[Yy]$') {
             return
@@ -632,8 +634,13 @@ function New-ClaudeMdTemplate {
     }
 
     if ($DryRun) {
-        Write-Host "[DRY-RUN] Would create CLAUDE.md in current directory"
+        Write-Host "[DRY-RUN] Would create CLAUDE.md at $claudeMd"
         return
+    }
+
+    # Ensure .claude directory exists
+    if (-not (Test-Path $claudeDir)) {
+        New-Item -ItemType Directory -Path $claudeDir -Force | Out-Null
     }
 
     $content = @'
@@ -683,25 +690,7 @@ The Anthropic API has a **5-minute TTL** on prompt cache entries. After 5 minute
 - Cache is evicted (10x cost increase!)
 - 200K context goes from $0.60 to $6.00 per request
 
-**Use the keepalive script:**
-```powershell
-# In another PowerShell window, while Claude is running
-.\claude-keepalive.ps1
-```
-
-Or manually keep cache warm:
-```
-# Send a no-op message every 4 minutes
-/loop --interval 240s echo "keepalive"
-```
-
-## Model Selection Strategy
-| Model | Input | Output | Use For |
-|-------|-------|--------|---------|
-| Haiku 3.5 | $0.80 | $4 | Quick tasks, searches |
-| Sonnet 4.x | $3 | $15 | General development |
-| Opus 4.5 | $5 | $25 | Complex architecture |
-| Opus 4.6 Fast | $30 | $150 | Emergency only |
+The keepalive hook is automatically configured in `.claude/settings.json` to keep the cache warm.
 
 ## PowerShell Pre-Processing Commands
 
@@ -736,12 +725,12 @@ magick.exe input.jpg -resize 2000x2000 -quality 85 output.jpg
 
     $content | Set-Content $claudeMd -Encoding UTF8
 
-    Write-Success "Created CLAUDE.md in current directory"
+    Write-Success "Created CLAUDE.md at $claudeMd"
 }
 
-# Create a batch file for easy pre-processing
+# Create a batch file for easy pre-processing (optional - hooks handle this automatically)
 function New-PreprocessScript {
-    Write-Header "Creating Pre-Processing Helper Scripts"
+    Write-Header "Creating Pre-Processing Helper Scripts (Optional)"
 
     $batchFile = Join-Path $PWD "preprocess-for-claude.bat"
     $psFile = Join-Path $PWD "preprocess-for-claude.ps1"
@@ -876,14 +865,14 @@ if ($Batch) {
 
     $psContent | Set-Content $psFile -Encoding UTF8
 
-    Write-Success "Created pre-processing scripts:"
+    Write-Success "Created optional pre-processing scripts (hooks handle this automatically):"
     Write-Host "  - $batchFile (Command Prompt)"
     Write-Host "  - $psFile (PowerShell with more features)"
 }
 
-# Create keepalive script
+# Create keepalive script (optional - hooks handle this automatically)
 function New-KeepaliveScript {
-    Write-Header "Creating Prompt Cache Keepalive Script"
+    Write-Header "Creating Prompt Cache Keepalive Script (Optional)"
 
     $keepaliveFile = Join-Path $PWD "claude-keepalive.ps1"
 
@@ -1007,9 +996,8 @@ while ($script:Running) {
 
     $content | Set-Content $keepaliveFile -Encoding UTF8
 
-    Write-Success "Created $keepaliveFile"
-    Write-Status "Usage: .\claude-keepalive.ps1 [-Interval 240]"
-    Write-Status "Run this in another PowerShell window while Claude Code is active"
+    Write-Success "Created optional keepalive script: $keepaliveFile"
+    Write-Status "Note: Hooks in .claude/settings.json already handle cache keepalive automatically"
 }
 
 # Create settings.json with keepalive hook
@@ -1117,9 +1105,7 @@ function Main {
     Write-Host "1. Review the environment variables in your PowerShell profile"
     Write-Host "2. Restart PowerShell or run: `$PROFILE"
     Write-Host "3. Start Claude Code with optimized settings"
-    Write-Host "4. For long sessions, run: .\claude-keepalive.ps1"
-    Write-Host "5. Check /cost regularly to monitor usage"
-    Write-Host "6. Use the preprocess-for-claude.ps1 script for document conversion"
+    Write-Host "4. Check /cost regularly to monitor usage"
     Write-Host ""
 
     if ($ReducedPrivacy) {
@@ -1129,7 +1115,7 @@ function Main {
     }
 
     Write-Host ""
-    Write-Host "Cache Keepalive: Run .\claude-keepalive.ps1 for sessions >5 minutes" -ForegroundColor Cyan
+    Write-Host "Hooks configured: Auto-compact, image pre-processing, cache keepalive" -ForegroundColor Cyan
     Write-Host ""
 
     Write-Success "Happy optimizing!"
