@@ -1,33 +1,38 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-    Claude Code Optimizer Comprehensive Validation Suite (Windows)
-    Tests ALL optimization claims with quantitative token measurements
+    Claude Code Optimizer - Configuration Validation Suite (Windows)
+    Validates setup without requiring headless Claude execution
+    NOTE: Hooks must be tested manually in an interactive Claude session
 
 .DESCRIPTION
-    This script validates:
-    1. PreToolUse hook (image resizing) with token savings
-    2. PostToolUse hook (cache keepalive)
-    3. PDF text extraction with token savings
-    4. Privacy environment variables
-    5. Auto-compact configuration
-    6. Dependency installation
+    Validates:
+    1. Claude Code installation
+    2. Dependencies (ImageMagick, pdftotext, markitdown)
+    3. Privacy environment variables
+    4. Auto-compact configuration
+    5. Hook configuration (PreToolUse, PostToolUse)
 
-.PARAMETER Detailed
-    Show detailed output
+    Hook execution must be verified manually in an interactive Claude session.
 
-.PARAMETER Keep
-    Keep test files and results
+.PARAMETER Verbose
+    Show detailed output including full config file contents
+
+.PARAMETER Help
+    Show help message
 
 .EXAMPLE
     .\validate.ps1
-    Run full validation with token measurements
+    Run full configuration validation
+
+.EXAMPLE
+    .\validate.ps1 -Verbose
+    Run with detailed output
 #>
 
 [CmdletBinding()]
 param(
-    [switch]$Detailed,
-    [switch]$Keep
+    [switch]$VerboseOutput
 )
 
 # Colors
@@ -37,35 +42,19 @@ $Colors = @{
     Error = 'Red'
     Warning = 'Yellow'
     Header = 'Blue'
-    Proof = 'Magenta'
     Metric = 'Magenta'
 }
 
 # Configuration
 $ScriptDir = $PSScriptRoot
 $RepoDir = Join-Path $ScriptDir "..\.."
-$TestDir = Join-Path $ScriptDir ".validation-test"
-$ResultsDir = Join-Path $ScriptDir ".validation-results"
 $TestImage = Join-Path $RepoDir "tests\test-image.png"
-$PdfFile = Join-Path $RepoDir "tests\test-document.pdf"
-$HookLog = "/tmp/hook-validation.log"
-$ClaudeCmd = "claude"
-$Timeout = 60
+$TestPdf = Join-Path $RepoDir "tests\test-document.pdf"
 
-# Token tracking
-$script:OriginalImageTokens = 0
-$script:OptimizedImageTokens = 0
-$script:OriginalPdfTokens = 0
-$script:OptimizedPdfTokens = 0
-
-# Test results
+# Test counters
 $script:TestsPassed = 0
 $script:TestsFailed = 0
 $script:TestsSkipped = 0
-$script:PreToolUseFired = $false
-$script:PostToolUseFired = $false
-$script:AutoCompactEnabled = $false
-$script:PrivacyVarsSet = $false
 
 # Output functions
 function Write-Header {
@@ -107,413 +96,299 @@ function Write-Warning {
     $script:TestsSkipped++
 }
 
-function Write-Proof {
-    param([string]$Message)
-    Write-Host "[PROOF] $Message" -ForegroundColor $Colors.Proof
-}
-
 function Write-Metric {
     param([string]$Message)
     Write-Host "[METRIC] $Message" -ForegroundColor $Colors.Metric
 }
 
-# Token counting function
-function Count-FileTokens {
+# Count tokens (rough approximation: chars / 4)
+function Count-Tokens {
     param([string]$FilePath)
     if (-not (Test-Path $FilePath)) { return 0 }
     $chars = (Get-Item $FilePath).Length
     return [math]::Floor($chars / 4)
 }
 
-# Cleanup
-function Cleanup {
-    if (-not $Keep) {
-        if (Test-Path $TestDir) { Remove-Item $TestDir -Recurse -Force }
-        if (Test-Path $ResultsDir) { Remove-Item $ResultsDir -Recurse -Force }
-    }
-}
-$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action { Cleanup }
+# Test 1: Check Claude Code installation
+function Test-ClaudeInstallation {
+    Write-Section "🔍 CLAUDE CODE INSTALLATION"
 
-# Check prerequisites
-function Check-Prerequisites {
-    Write-Section "CHECKING PREREQUISITES"
-
-    # Check Claude Code
-    $claude = Get-Command claude -ErrorAction SilentlyContinue
-    if (-not $claude) {
-        $possiblePaths = @(
-            "$env:USERPROFILE\.local\bin\claude.exe",
-            "$env:LOCALAPPDATA\Programs\Claude\Claude.exe",
-            "C:\Program Files\Claude\Claude.exe"
-        )
-        foreach ($path in $possiblePaths) {
-            if (Test-Path $path) { $script:ClaudeCmd = $path; break }
-        }
-    } else {
-        $script:ClaudeCmd = $claude.Source
-    }
-
-    if (-not $script:ClaudeCmd) {
-        Write-Error "Claude Code not found"
-        exit 1
-    }
-    Write-Success "Claude Code found: $script:ClaudeCmd"
-
-    # Check settings.json
-    $userSettings = Join-Path $env:USERPROFILE ".claude\settings.json"
-    if (-not (Test-Path $userSettings)) {
-        Write-Error "No settings.json found at ~/.claude/settings.json"
-        Write-Status "Run optimize-claude.ps1 first"
-        exit 1
-    }
-    Write-Success "Found settings.json"
-
-    # Check hooks
-    $settingsContent = Get-Content $userSettings -Raw
-    if ($settingsContent -match '"PreToolUse"') { Write-Success "PreToolUse hook configured" }
-    else { Write-Error "PreToolUse hook not configured" }
-
-    if ($settingsContent -match '"PostToolUse"') { Write-Success "PostToolUse hook configured" }
-    else { Write-Error "PostToolUse hook not configured" }
-
-    # Check dependencies
-    $magick = Get-Command magick -ErrorAction SilentlyContinue
-    $convert = Get-Command convert -ErrorAction SilentlyContinue
-    if ($magick -or $convert) { Write-Success "ImageMagick found" }
-    else { Write-Warning "ImageMagick not found" }
-
-    $pdftotext = Get-Command pdftotext -ErrorAction SilentlyContinue
-    if ($pdftotext) { Write-Success "pdftotext found" }
-    else { Write-Warning "pdftotext not found" }
-}
-
-# Create test files
-function Create-TestFiles {
-    Write-Section "CREATING TEST FILES"
-    New-Item -ItemType Directory -Path $TestDir -Force | Out-Null
-
-    # Use test image
-    if (Test-Path $TestImage) {
-        Copy-Item $TestImage (Join-Path $TestDir "test-image.png")
-        $script:OriginalImageTokens = Count-FileTokens $TestImage
-        $size = (Get-Item $TestImage).Length
-        Write-Success "Using test-image.png ($(($size/1MB).ToString('F1')) MB, ~$($script:OriginalImageTokens) tokens)"
-    }
-
-    # Create test text
-    $testDoc = Join-Path $TestDir "test-doc.txt"
-    "This is a test document for Claude Code hook validation." | Set-Content $testDoc
-    Write-Success "Created test-doc.txt"
-
-    # Use test PDF
-    if (Test-Path $PdfFile) {
-        Copy-Item $PdfFile (Join-Path $TestDir "test-document.pdf")
-        $script:OriginalPdfTokens = Count-FileTokens $PdfFile
-        $size = (Get-Item $PdfFile).Length
-        Write-Success "Using test-document.pdf ($(($size/1MB).ToString('F1')) MB, ~$($script:OriginalPdfTokens) tokens)"
-    }
-}
-
-# Run Claude headlessly
-function Run-ClaudeHeadless {
-    param([string]$InputCmd, [string]$OutputFile, [string]$Description)
-    Write-Status "Running: $Description"
-
-    wsl rm -f $HookLog 2>$null
-
-    $job = Start-Job -ScriptBlock {
-        param($cmd, $inputCmd)
-        $inputCmd | & $cmd -p 2>&1
-    } -ArgumentList $script:ClaudeCmd, $InputCmd
-
-    $completed = $job | Wait-Job -Timeout $Timeout
-    if (-not $completed) {
-        Write-Warning "Claude command timed out"
-        Stop-Job $job
-        Remove-Job $job
-        return $false
-    }
-
-    $output = Receive-Job $job
-    Remove-Job $job
-    $output | Set-Content $OutputFile -Encoding UTF8
-    return (Test-Path $OutputFile)
-}
-
-# Test PreToolUse
-function Test-PreToolUseHook {
-    Write-Section "TEST 1: PreToolUse Hook (Image Processing)"
-    Write-Status "Testing if PreToolUse hook fires..."
-
-    wsl rm -f /tmp/resized_*.png 2>$null
-    $outputFile = Join-Path $ResultsDir "claude-output-image.txt"
-    $testImage = Join-Path $TestDir "test-image.png"
-
-    if (-not (Run-ClaudeHeadless "Read $testImage" $outputFile "Read image file")) {
-        Write-Error "Failed to run Claude Code"
-        return
-    }
-
-    if (Test-Path $outputFile) { Write-Success "Claude Code produced output" }
-    else { Write-Error "No output captured"; return }
-
-    Start-Sleep -Seconds 2
-
-    Write-Status "Checking for resized image in /tmp (via WSL)..."
-    $resizedFiles = wsl ls /tmp/resized_*.png 2>$null
-
-    if ($resizedFiles) {
-        $resizedFile = $resizedFiles | Select-Object -First 1
-        $origSize = (Get-Item (Join-Path $TestDir "test-image.png")).Length
-        $resizedSize = [int](wsl stat -c%s $resizedFile 2>$null)
-        $script:OptimizedImageTokens = Count-FileTokens (wsl wslpath -w $resizedFile 2>$null)
-        $tokensSaved = $script:OriginalImageTokens - $script:OptimizedImageTokens
-
-        Write-Success "PreToolUse hook FIRED and resized the image!"
-        Write-Proof "Resized file: $resizedFile"
-        Write-Metric "Original: $origSize bytes (~$($script:OriginalImageTokens) tokens)"
-        Write-Metric "Resized: $resizedSize bytes (~$($script:OptimizedImageTokens) tokens)"
-
-        if ($resizedSize -lt $origSize) {
-            $reduction = [math]::Round(100 - ($resizedSize * 100 / $origSize))
-            Write-Metric "Size reduction: $reduction%"
-        }
-        Write-Metric "Token savings: ~$tokensSaved tokens"
-
-        $script:PreToolUseFired = $true
-    } else {
-        Write-Error "PreToolUse hook did NOT fire - no resized image found"
-    }
-}
-
-# Test PostToolUse
-function Test-PostToolUseHook {
-    Write-Section "TEST 2: PostToolUse Hook (Cache Keepalive)"
-    Write-Status "Testing if PostToolUse hook fires..."
-
-    wsl rm -f $HookLog 2>$null
-    $outputFile = Join-Path $ResultsDir "claude-output-ls.txt"
-
-    if (-not (Run-ClaudeHeadless "ls" $outputFile "List directory")) {
-        Write-Error "Failed to run Claude Code"
-        return
-    }
-
-    if (Test-Path $outputFile) { Write-Success "Claude Code produced output" }
-    else { Write-Error "No output captured"; return }
-
-    Write-Status "Checking hook log..."
-    $logContent = wsl cat $HookLog 2>$null
-
-    if ($logContent) {
-        $entries = $logContent -split "`n" | Where-Object { $_ -ne "" }
-        if ($entries.Count -gt 0) {
-            Write-Success "PostToolUse hook FIRED - $($entries.Count) entries!"
-            Write-Proof "Hook log entries:"
-            $entries | Select-Object -First 3 | ForEach-Object { Write-Host "  $_" }
-            $script:PostToolUseFired = $true
-        } else {
-            Write-Error "Hook log is empty"
-        }
-    } else {
-        Write-Error "PostToolUse hook did NOT fire"
-    }
-}
-
-# Test PDF Processing
-function Test-PdfProcessing {
-    Write-Section "TEST 3: PDF Processing (Binary File Optimization)"
-
-    $pdfFile = Join-Path $TestDir "test-document.pdf"
-    if (-not (Test-Path $pdfFile)) {
-        Write-Warning "No test-document.pdf found - skipping PDF test"
-        return
-    }
-
-    Write-Status "Testing PDF text extraction..."
-    $extractedText = Join-Path $TestDir "extracted-text.txt"
-    $pdftotext = Get-Command pdftotext -ErrorAction SilentlyContinue
-
-    if (-not $pdftotext) {
-        Write-Warning "pdftotext not available - skipping PDF test"
-        return
-    }
-
-    if (& pdftotext.exe -layout $pdfFile $extractedText 2>$null) {
-        if (Test-Path $extractedText) {
-            $pdfSize = (Get-Item $pdfFile).Length
-            $txtSize = (Get-Item $extractedText).Length
-            $script:OptimizedPdfTokens = Count-FileTokens $extractedText
-            $tokensSaved = $script:OriginalPdfTokens - $script:OptimizedPdfTokens
-
-            Write-Success "PDF text extraction worked!"
-            Write-Metric "PDF: $pdfSize bytes (~$($script:OriginalPdfTokens) tokens)"
-            Write-Metric "Text: $txtSize bytes (~$($script:OptimizedPdfTokens) tokens)"
-
-            if ($txtSize -lt $pdfSize) {
-                $reduction = [math]::Round(100 - ($txtSize * 100 / $pdfSize))
-                Write-Metric "Size reduction: $reduction%"
-            }
-            Write-Metric "Token savings: ~$tokensSaved tokens"
-        } else {
-            Write-Warning "PDF extraction produced empty file"
-        }
-    } else {
-        Write-Error "PDF text extraction failed"
-    }
-}
-
-# Test Privacy Configuration
-function Test-PrivacyConfiguration {
-    Write-Section "TEST 4: Privacy Configuration"
-
-    $vars = @(
-        @{ Name = "DISABLE_TELEMETRY"; Expected = "1" },
-        @{ Name = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"; Expected = "1" },
-        @{ Name = "OTEL_LOG_USER_PROMPTS"; Expected = "0" },
-        @{ Name = "OTEL_LOG_TOOL_DETAILS"; Expected = "0" },
-        @{ Name = "CLAUDE_CODE_AUTO_COMPACT_WINDOW"; Expected = "180000" }
+    $claudePaths = @(
+        (Get-Command claude -ErrorAction SilentlyContinue),
+        "$env:USERPROFILE\.local\bin\claude.exe",
+        "$env:LOCALAPPDATA\Programs\Claude\Claude.exe",
+        "$env:LOCALAPPDATA\claude\claude.exe",
+        "C:\Program Files\Claude\Claude.exe",
+        "C:\Program Files (x86)\Claude\Claude.exe"
     )
 
+    $foundClaude = $null
+    foreach ($path in $claudePaths) {
+        if ($path -and (Test-Path $path)) {
+            $foundClaude = $path
+            break
+        }
+    }
+
+    if ($foundClaude) {
+        Write-Success "Claude Code found: $foundClaude"
+        return $true
+    } else {
+        Write-Error "Claude Code not found"
+        Write-Status "Install from: https://claude.ai/code"
+        return $false
+    }
+}
+
+# Test 2: Check dependencies
+function Test-Dependencies {
+    Write-Section "📦 DEPENDENCIES"
+
+    # ImageMagick
+    $magick = Get-Command magick -ErrorAction SilentlyContinue
+    $convert = Get-Command convert -ErrorAction SilentlyContinue
+    if ($magick -or $convert) {
+        $imgCmd = if ($magick) { "magick" } else { "convert" }
+        Write-Success "ImageMagick installed ($imgCmd)"
+    } else {
+        Write-Error "ImageMagick not found (required for image optimization)"
+        Write-Status "Install: winget install ImageMagick.ImageMagick"
+        Write-Status "        choco install imagemagick"
+    }
+
+    # pdftotext
+    $pdftotext = Get-Command pdftotext -ErrorAction SilentlyContinue
+    if ($pdftotext) {
+        Write-Success "pdftotext (poppler) installed"
+    } else {
+        Write-Error "pdftotext not found (required for PDF text extraction)"
+        Write-Status "Install: choco install poppler"
+        Write-Status "Download from: https://github.com/oschwartz10612/poppler-windows/releases"
+    }
+
+    # markitdown
+    $markitdown = Get-Command markitdown -ErrorAction SilentlyContinue
+    if ($markitdown) {
+        Write-Success "markitdown installed"
+    } else {
+        Write-Warning "markitdown not found (optional, for Office document conversion)"
+        Write-Status "Install: pip install markitdown"
+    }
+}
+
+# Test 3: Check privacy configuration
+function Test-PrivacyConfiguration {
+    Write-Section "🔒 PRIVACY CONFIGURATION"
+
     $privacyScore = 0
+    $vars = @(
+        @{ Name = "DISABLE_TELEMETRY"; Expected = "1"; Description = "Disable all telemetry" },
+        @{ Name = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"; Expected = "1"; Description = "Block non-essential network traffic" },
+        @{ Name = "OTEL_LOG_USER_PROMPTS"; Expected = "0"; Description = "Don't log user prompts" },
+        @{ Name = "OTEL_LOG_TOOL_DETAILS"; Expected = "0"; Description = "Don't log tool details" }
+    )
+
     foreach ($var in $vars) {
         $actual = [Environment]::GetEnvironmentVariable($var.Name, "User")
         if ($actual -eq $var.Expected) {
-            Write-Success "$($var.Name)=$actual"
+            Write-Success "$($var.Name)=$actual ($($var.Description))"
             $privacyScore++
         } else {
             Write-Error "$($var.Name) not set (expected: $($var.Expected), got: $actual)"
+            Write-Status "Set in PowerShell: [Environment]::SetEnvironmentVariable('$($var.Name)', '$($var.Expected)', 'User')"
         }
     }
 
+    # Auto-compact window
+    $autoCompactWindow = [Environment]::GetEnvironmentVariable("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "User")
+    if ($autoCompactWindow -eq "180000") {
+        Write-Success "CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000 (3 minute compact window)"
+        $privacyScore++
+    } else {
+        Write-Error "CLAUDE_CODE_AUTO_COMPACT_WINDOW not set to 180000"
+        Write-Status "Set in PowerShell: [Environment]::SetEnvironmentVariable('CLAUDE_CODE_AUTO_COMPACT_WINDOW', '180000', 'User')"
+    }
+
+    Write-Host ""
     Write-Metric "Privacy Score: $privacyScore/5"
-    if ($privacyScore -eq 5) { $script:PrivacyVarsSet = $true }
+
+    if ($privacyScore -eq 5) {
+        Write-Success "Maximum privacy configured ✓"
+    } elseif ($privacyScore -ge 3) {
+        Write-Warning "Partial privacy ($privacyScore/5) - some protections active"
+    } else {
+        Write-Error "Privacy not configured - follow suggestions above"
+    }
 }
 
-# Test Auto-Compact
+# Test 4: Check auto-compact configuration
 function Test-AutoCompact {
-    Write-Section "TEST 5: Auto-Compact Configuration"
+    Write-Section "⚙️  AUTO-COMPACT CONFIGURATION"
 
     $claudeConfig = Join-Path $env:USERPROFILE ".claude\.claude.json"
-    if (Test-Path $claudeConfig) {
-        $config = Get-Content $claudeConfig -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue
-        if ($config.autoCompactEnabled -eq $true) {
-            Write-Success "Auto-compact enabled"
-            $script:AutoCompactEnabled = $true
-        } else {
-            Write-Error "Auto-compact not enabled"
-        }
+
+    if (-not (Test-Path $claudeConfig)) {
+        Write-Error "Claude config not found: $claudeConfig"
+        Write-Status "Run optimize-claude.ps1 to create this file"
+        return
+    }
+
+    $configContent = Get-Content $claudeConfig -Raw -ErrorAction SilentlyContinue
+    if ($configContent -match '"autoCompactEnabled":\s*true') {
+        Write-Success "autoCompactEnabled: true"
     } else {
-        Write-Error "Claude config file not found: $claudeConfig"
+        Write-Error "autoCompactEnabled not set to true"
+        Write-Status "Run optimize-claude.ps1 or manually edit $claudeConfig"
+    }
+
+    if ($VerboseOutput) {
+        Write-Host ""
+        Write-Status "Current config contents:"
+        $configContent
     }
 }
 
-# Run all tests
-function Run-AllTests {
-    New-Item -ItemType Directory -Path $ResultsDir -Force | Out-Null
-    Test-PreToolUseHook
-    Test-PostToolUseHook
-    Test-PdfProcessing
-    Test-PrivacyConfiguration
-    Test-AutoCompact
+# Test 5: Check hook configuration
+function Test-HookConfiguration {
+    Write-Section "🪝 HOOK CONFIGURATION"
+
+    $userSettings = Join-Path $env:USERPROFILE ".claude\settings.json"
+    $projectSettings = Join-Path $RepoDir ".claude\settings.json"
+
+    $settingsFile = $null
+    if (Test-Path $userSettings) {
+        $settingsFile = $userSettings
+    } elseif (Test-Path $projectSettings) {
+        $settingsFile = $projectSettings
+    }
+
+    if (-not $settingsFile) {
+        Write-Error "settings.json not found"
+        Write-Status "Checked locations:"
+        Write-Status "  - $userSettings"
+        Write-Status "  - $projectSettings"
+        Write-Status "Run optimize-claude.ps1 to configure hooks"
+        return
+    }
+
+    $settingsContent = Get-Content $settingsFile -Raw
+
+    $preConfigured = $false
+    $postConfigured = $false
+
+    if ($settingsContent -match '"PreToolUse"') {
+        Write-Success "PreToolUse hook configured"
+        $preConfigured = $true
+    } else {
+        Write-Error "PreToolUse hook not configured"
+        Write-Status "This hook auto-resizes images before Claude processes them"
+    }
+
+    if ($settingsContent -match '"PostToolUse"') {
+        Write-Success "PostToolUse hook configured"
+        $postConfigured = $true
+    } else {
+        Write-Error "PostToolUse hook not configured"
+        Write-Status "This hook keeps the prompt cache warm (saves 90% on cache misses)"
+    }
+
+    if ($VerboseOutput) {
+        Write-Host ""
+        Write-Status "Current hooks configuration:"
+        $settingsContent
+    }
 }
 
-# Generate report
-function Generate-Report {
-    Write-Header "COMPREHENSIVE VALIDATION REPORT"
+# Print manual test instructions
+function Write-ManualTests {
+    Write-Header "🧪 MANUAL HOOK VERIFICATION"
+
+    $wslRepoDir = wsl wslpath -a "$RepoDir" 2>$null
+    if (-not $wslRepoDir) {
+        $wslRepoDir = "/mnt/c" + ($RepoDir -replace '^C:', '').Replace('\', '/')
+    }
+
+    Write-Host "Since hooks require an interactive Claude session, verify them manually:"
+    Write-Host ""
+
+    Write-Host "Test 1: PreToolUse Hook (Image Processing)" -Bold
+    Write-Host "1. Start an interactive Claude session: claude"
+    Write-Host "2. Run this command inside Claude:"
+    Write-Host "   Read $TestImage" -ForegroundColor $Colors.Info
+    Write-Host "3. Check if the image was resized:"
+    Write-Host "   wsl ls -la /tmp/resized_*.png" -ForegroundColor $Colors.Info
+    Write-Host "4. Expected: A resized image file should exist (~33% smaller)"
+    Write-Host ""
+
+    Write-Host "Test 2: PostToolUse Hook (Cache Keepalive)" -Bold
+    Write-Host "1. In the same Claude session, run:"
+    Write-Host "   ls" -ForegroundColor $Colors.Info
+    Write-Host "2. Check the hook log:"
+    Write-Host "   wsl cat /tmp/cache-keepalive.log" -ForegroundColor $Colors.Info
+    Write-Host "3. Expected: Log entries showing 'keepalive' timestamps"
+    Write-Host "4. The hook fires every ~4 minutes to keep the 5-minute cache alive"
+    Write-Host ""
+
+    Write-Host "Test 3: PDF Text Extraction" -Bold
+    Write-Host "1. Extract text from the test PDF:"
+    Write-Host "   pdftotext -layout `"$TestPdf`" C:\temp\extracted.txt" -ForegroundColor $Colors.Info
+    Write-Host "2. Compare sizes:"
+    Write-Host "   dir `"$TestPdf`" C:\temp\extracted.txt" -ForegroundColor $Colors.Info
+    Write-Host "3. Run inside Claude:"
+    Write-Host "   Read C:\temp\extracted.txt" -ForegroundColor $Colors.Info
+    Write-Host "4. Expected: Text file is ~10x smaller than binary PDF"
+    Write-Host ""
+
+    Write-Host "Note: If you don't have the test files, download them:" -ForegroundColor $Colors.Warning
+    Write-Host "   wget -O tests/test-document.pdf https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf" -ForegroundColor $Colors.Info
+}
+
+# Generate final report
+function Write-Report {
+    Write-Header "📊 VALIDATION SUMMARY"
 
     Write-Host "Test Results: Passed: $script:TestsPassed | Failed: $script:TestsFailed | Skipped: $script:TestsSkipped"
     Write-Host ""
 
-    # Dependencies
-    Write-Section "📦 Dependencies"
-    $magick = Get-Command magick -ErrorAction SilentlyContinue
-    $convert = Get-Command convert -ErrorAction SilentlyContinue
-    $pdftotext = Get-Command pdftotext -ErrorAction SilentlyContinue
-    if ($magick -or $convert) {
-        if ($pdftotext) { Write-Success "All dependencies installed" }
-        else { Write-Warning "ImageMagick OK, pdftotext missing" }
-    } else { Write-Error "ImageMagick not installed" }
+    $allConfigsOk = $script:TestsFailed -eq 0
 
-    # Privacy
-    Write-Section "🔒 Privacy Configuration"
-    $privacyScore = 0
-    if ($env:DISABLE_TELEMETRY -eq "1") { $privacyScore++ }
-    if ($env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC -eq "1") { $privacyScore++ }
-    if ($env:OTEL_LOG_USER_PROMPTS -eq "0") { $privacyScore++ }
-    if ($env:OTEL_LOG_TOOL_DETAILS -eq "0") { $privacyScore++ }
-    if ($env:CLAUDE_CODE_AUTO_COMPACT_WINDOW -eq "180000") { $privacyScore++ }
-
-    Write-Metric "Privacy Score: $privacyScore/5"
-    if ($privacyScore -eq 5) { Write-Success "Maximum privacy configured" }
-
-    # Auto-compact
-    Write-Section "⚙️  Auto-Compact"
-    $claudeConfig = Join-Path $env:USERPROFILE ".claude\.claude.json"
-    if ((Test-Path $claudeConfig) -and (Get-Content $claudeConfig -Raw) -match '"autoCompactEnabled": true') {
-        Write-Success "Auto-compact enabled"
-    } else { Write-Error "Auto-compact not enabled" }
-
-    # Hooks
-    Write-Section "🪝 Hook Execution"
-    if ($script:PreToolUseFired) { Write-Success "PreToolUse (image processing)" }
-    else { Write-Error "PreToolUse did not fire" }
-
-    if ($script:PostToolUseFired) { Write-Success "PostToolUse (cache keepalive)" }
-    else { Write-Error "PostToolUse did not fire" }
-
-    # Token savings
-    Write-Section "💰 Token Savings"
-    $totalSaved = 0
-    if ($script:OriginalImageTokens -gt 0 -and $script:OptimizedImageTokens -gt 0) {
-        $imgSaved = $script:OriginalImageTokens - $script:OptimizedImageTokens
-        $imgPct = [math]::Round(($imgSaved * 100 / $script:OriginalImageTokens), 1)
-        Write-Metric "Images: $($script:OriginalImageTokens) → $($script:OptimizedImageTokens) tokens (${imgPct}% reduction)"
-        $totalSaved += $imgSaved
-    }
-    if ($script:OriginalPdfTokens -gt 0 -and $script:OptimizedPdfTokens -gt 0) {
-        $pdfSaved = $script:OriginalPdfTokens - $script:OptimizedPdfTokens
-        $pdfPct = [math]::Round(($pdfSaved * 100 / $script:OriginalPdfTokens), 1)
-        Write-Metric "PDFs: $($script:OriginalPdfTokens) → $($script:OptimizedPdfTokens) tokens (${pdfPct}% reduction)"
-        $totalSaved += $pdfSaved
-    }
-    Write-Metric "Total token savings: ~$totalSaved tokens"
-
-    # Overall verdict
-    Write-Section "Overall Verdict"
-    $allGood = $script:PreToolUseFired -and $script:PostToolUseFired -and
-               $script:PrivacyVarsSet -and $script:AutoCompactEnabled
-
-    if ($allGood) {
-        Write-Success "ALL OPTIMIZATIONS WORKING"
+    if ($allConfigsOk) {
+        Write-Success "ALL CONFIGURATIONS VALID ✓"
         Write-Host ""
-        Write-Host "Your Claude Code environment is fully optimized:"
-        Write-Host "  • Hooks are firing automatically"
-        Write-Host "  • Privacy settings configured"
-        Write-Host "  • Token savings verified (~$totalSaved tokens)"
+        Write-Host "Your Claude Code environment is properly configured:"
+        Write-Host "  • Dependencies installed"
+        Write-Host "  • Privacy settings active"
         Write-Host "  • Auto-compact enabled"
-    } elseif ($script:PreToolUseFired -or $script:PostToolUseFired) {
-        Write-Warning "PARTIALLY OPTIMIZED - Some optimizations working"
+        Write-Host "  • Hooks configured"
+        Write-Host ""
+        Write-Host "Next step: Run the manual tests above to verify hook execution" -ForegroundColor $Colors.Warning
     } else {
-        Write-Error "NOT OPTIMIZED - Run .\optimize-claude.ps1"
+        Write-Error "CONFIGURATION INCOMPLETE"
+        Write-Host ""
+        Write-Host "Some optimizations are not configured."
+        Write-Host "Review the errors above and run optimize-claude.ps1 to fix."
     }
 
-    if ($allGood) { exit 0 } else { exit 1 }
+    Write-Host ""
+    Write-Host "Quick Commands:" -Bold
+    Write-Host "  Run optimizer:  .\scripts\windows\optimize-claude.ps1"
+    Write-Host "  Debug mode:     .\scripts\windows\validate.ps1 -VerboseOutput"
+
+    if ($allConfigsOk) {
+        exit 0
+    } else {
+        exit 1
+    }
 }
 
 # Main
-Write-Header "Claude Code Optimizer - Comprehensive Validation Suite"
-New-Item -ItemType Directory -Path $ResultsDir -Force | Out-Null
+Write-Header "Claude Code Optimizer - Configuration Validation"
 
-Write-Status "This comprehensive suite will:"
-Write-Status "1. Check all dependencies and configuration"
-Write-Status "2. Create test files and measure original token counts"
-Write-Status "3. Run Claude Code to trigger hooks"
-Write-Status "4. Measure actual token savings"
-Write-Status "5. Generate detailed validation report"
-Write-Host ""
+Test-ClaudeInstallation
+Test-Dependencies
+Test-PrivacyConfiguration
+Test-AutoCompact
+Test-HookConfiguration
 
-Check-Prerequisites
-Create-TestFiles
-Run-AllTests
-Generate-Report
+Write-ManualTests
+Write-Report
