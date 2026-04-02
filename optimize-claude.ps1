@@ -305,17 +305,131 @@ function New-HookScripts {
         New-Item -ItemType Directory -Path $hooksDir -Force | Out-Null
     }
 
+    # Debug output
+    Write-Status "Bash available: $script:BashAvailable"
+
     if ($script:BashAvailable) {
+        Write-Status "Creating bash hook scripts..."
         $pretooluseSh = '#!/usr/bin/env bash
+# pretooluse.sh - PreToolUse hook for Read tool
+# Receives JSON on stdin. Exit codes: 0=proceed, 2=intercept (stderr shown to Claude)
+
 INPUT="$(cat)"
 TOOL_NAME="$(echo "$INPUT" | jq -r ''.tool_name // empty'')"
 FILE_PATH="$(echo "$INPUT" | jq -r ''.tool_input.file_path // .tool_input.filePath // empty'')"
+
 LOG_FILE="/tmp/claude-hook-validation.log"
+MAX_DIMENSION="${CLAUDE_IMAGE_MAX_DIMENSION:-2000}"
+MAX_FILE_SIZE_MB="${CLAUDE_IMAGE_MAX_SIZE_MB:-5}"
+QUALITY="${CLAUDE_IMAGE_QUALITY:-85}"
+
 log() { echo "$(date -Iseconds) | PreToolUse | $1" >> "$LOG_FILE"; }
+
+# Only handle Read tool
 if [[ "$TOOL_NAME" != "Read" ]]; then exit 0; fi
 if [[ -z "$FILE_PATH" ]]; then log "NO_FILE_PATH"; exit 0; fi
 log "FILE | $FILE_PATH"
 if [[ ! -f "$FILE_PATH" ]]; then log "FILE_NOT_FOUND | $FILE_PATH"; exit 0; fi
+
+EXTENSION="${FILE_PATH##*.}"
+LOWER_EXT="$(echo "$EXTENSION" | tr ''[:upper:]'' ''[:lower:]'')"
+
+# Image handling - resize in-place, exit 0
+image_extensions="png jpg jpeg gif webp bmp tiff tif"
+if [[ " $image_extensions " =~ " $LOWER_EXT " ]]; then
+    log "IMAGE_DETECTED | $FILE_PATH"
+    if ! command -v magick >/dev/null 2>&1 && ! command -v convert >/dev/null 2>&1; then
+        log "NO_IMAGEMAGICK | Skipping resize"; exit 0
+    fi
+    # Get dimensions
+    if command -v magick >/dev/null 2>&1; then
+        identify_output=$(magick identify -format "%wx%h" "$FILE_PATH" 2>/dev/null)
+    else
+        identify_output=$(convert "$FILE_PATH" -format "%wx%h" info: 2>/dev/null)
+    fi
+    if [[ "$identify_output" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+        width="${BASH_REMATCH[1]}"; height="${BASH_REMATCH[2]}"
+        file_size=$(stat -f%z "$FILE_PATH" 2>/dev/null || stat -c%s "$FILE_PATH" 2>/dev/null)
+        max_bytes=$((MAX_FILE_SIZE_MB * 1024 * 1024))
+        if [[ $width -gt $MAX_DIMENSION || $height -gt $MAX_DIMENSION || $file_size -gt $max_bytes ]]; then
+            log "RESIZING | ${width}x${height} | $file_size bytes"
+            temp_file="/tmp/claude-resize-$(basename "$FILE_PATH")"
+            if command -v magick >/dev/null 2>&1; then
+                magick "$FILE_PATH" -resize "${MAX_DIMENSION}x${MAX_DIMENSION}>" -quality "$QUALITY" "$temp_file" 2>/dev/null
+            else
+                convert "$FILE_PATH" -resize "${MAX_DIMENSION}x${MAX_DIMENSION}>" -quality "$QUALITY" "$temp_file" 2>/dev/null
+            fi
+            if [[ -f "$temp_file" ]]; then
+                cp "$temp_file" "$FILE_PATH"; rm -f "$temp_file"
+                new_size=$(stat -f%z "$FILE_PATH" 2>/dev/null || stat -c%s "$FILE_PATH" 2>/dev/null)
+                log "RESIZED | $file_size -> $new_size bytes"
+            fi
+        else
+            log "WITHIN_LIMITS | ${width}x${height} | $file_size bytes"
+        fi
+    fi
+    exit 0
+fi
+
+# PDF handling - convert to text, exit 2
+if [[ "$LOWER_EXT" == "pdf" ]]; then
+    if command -v pdftotext >/dev/null 2>&1; then
+        temp_txt="/tmp/claude-pdf-$(date +%s).txt"
+        if pdftotext -layout "$FILE_PATH" "$temp_txt" 2>/dev/null; then
+            content=$(cat "$temp_txt" 2>/dev/null); rm -f "$temp_txt"
+            if [[ -n "$content" ]]; then
+                if [[ ${#content} -gt 9500 ]]; then
+                    content="${content:0:9500}
+
+[... TRUNCATED - file too large for hook output]"
+                fi
+                log "PDF_CONVERTED | $FILE_PATH | ${#content} chars"
+                echo "Converted PDF content from ${FILE_PATH}:
+
+$content" >&2
+                exit 2
+            fi
+        fi
+    fi
+    if command -v markitdown >/dev/null 2>&1; then
+        content=$(markitdown "$FILE_PATH" 2>/dev/null)
+        if [[ -n "$content" ]]; then
+            if [[ ${#content} -gt 9500 ]]; then
+                content="${content:0:9500}
+
+[... TRUNCATED]"
+            fi
+            log "PDF_MARKITDOWN | $FILE_PATH | ${#content} chars"
+            echo "Converted PDF content from ${FILE_PATH}:
+
+$content" >&2
+            exit 2
+        fi
+    fi
+    log "NO_PDF_CONVERTER | $FILE_PATH"; exit 0
+fi
+
+# Office documents - convert to markdown, exit 2
+doc_extensions="docx xlsx pptx doc xls ppt"
+if [[ " $doc_extensions " =~ " $LOWER_EXT " ]]; then
+    if command -v markitdown >/dev/null 2>&1; then
+        content=$(markitdown "$FILE_PATH" 2>/dev/null)
+        if [[ -n "$content" ]]; then
+            if [[ ${#content} -gt 9500 ]]; then
+                content="${content:0:9500}
+
+[... TRUNCATED]"
+            fi
+            log "DOC_CONVERTED | $FILE_PATH | ${#content} chars"
+            echo "Converted document content from ${FILE_PATH}:
+
+$content" >&2
+            exit 2
+        fi
+    fi
+    log "NO_DOC_CONVERTER | $FILE_PATH"; exit 0
+fi
+
 exit 0'
         $posttooluseSh = '#!/usr/bin/env bash
 INPUT="$(cat)"
@@ -324,18 +438,118 @@ LOG_FILE="/tmp/claude-hook-validation.log"
 echo "$(date -Iseconds) | PostToolUse | FIRED | Tool: ${TOOL_NAME:-unknown}" >> "$LOG_FILE"
 exit 0'
         $fileguardSh = '#!/usr/bin/env bash
+# file-guard.sh - blocks writes to sensitive files and paths
+# Event: PreToolUse
+# Matcher: Write|Edit|MultiEdit|Bash
+# Exit 0 = allow | Exit 2 = block (stderr message shown to Claude)
+
 INPUT="$(cat)"
 TOOL_NAME="$(echo "$INPUT" | jq -r ''.tool_name // empty'')"
 FILE_PATH="$(echo "$INPUT" | jq -r ''.tool_input.file_path // .tool_input.filePath // empty'')"
+COMMAND="$(echo "$INPUT" | jq -r ''.tool_input.command // empty'')"
+
 LOG_FILE="/tmp/claude-file-guard.log"
+
+# Sensitive path patterns (POSIX extended regex)
+BLOCKED_PATTERNS=(
+    ''\.env$''
+    ''\.env\.''
+    ''\.git/''
+    ''package-lock\.json$''
+    ''yarn\.lock$''
+    ''pnpm-lock\.yaml$''
+    ''\.ssh/''
+    ''id_rsa''
+    ''id_ed25519''
+    ''credentials\.json$''
+    ''\.aws/credentials''
+    ''\.gnupg/''
+    ''secrets\.''
+    ''\.pem$''
+    ''\.key$''
+)
+
+block_with_reason() {
+    local path="$1" pattern="$2"
+    echo "[file-guard] $(date -Iseconds) BLOCKED tool=$TOOL_NAME path=$path pattern=$pattern" >> "$LOG_FILE"
+    echo "BLOCKED: ''$path'' matches protected pattern ''$pattern''. If you genuinely need to edit this file, the user must do it manually." >&2
+    exit 2
+}
+
+check_path() {
+    local path="$1"
+    if [[ -z "$path" ]]; then return; fi
+    for pattern in "${BLOCKED_PATTERNS[@]}"; do
+        if echo "$path" | grep -qE "$pattern"; then
+            block_with_reason "$path" "$pattern"
+        fi
+    done
+}
+
+# Write / Edit / MultiEdit: check tool_input.file_path
+if [[ "$TOOL_NAME" == "Write" || "$TOOL_NAME" == "Edit" || "$TOOL_NAME" == "MultiEdit" ]]; then
+    check_path "$FILE_PATH"
+fi
+
+# Bash: scan the command string for suspicious path patterns
+if [[ "$TOOL_NAME" == "Bash" && -n "$COMMAND" ]]; then
+    for pattern in "${BLOCKED_PATTERNS[@]}"; do
+        if echo "$COMMAND" | grep -qE "$pattern"; then
+            echo "[file-guard] $(date -Iseconds) BLOCKED bash command matching pattern=$pattern" >> "$LOG_FILE"
+            echo "BLOCKED: Bash command appears to touch a protected path (pattern: $pattern). If intentional, the user must run this command manually." >&2
+            exit 2
+        fi
+    done
+fi
+
 echo "[file-guard] $(date -Iseconds) ALLOWED tool=$TOOL_NAME path=$FILE_PATH" >> "$LOG_FILE"
 exit 0'
         $notifySh = '#!/usr/bin/env bash
+# notify.sh - cross-platform desktop notifications for Claude Code events
+# Event: Notification
+# Exit 2 = we handled it, suppress default notification
+
 INPUT="$(cat)"
 MESSAGE="$(echo "$INPUT" | jq -r ''.message // .title // "Claude Code notification"'')"
 TITLE="$(echo "$INPUT" | jq -r ''.title // "Claude Code"'')"
+
 LOG_FILE="/tmp/claude-notify.log"
 echo "[notify] $(date -Iseconds) title=$TITLE msg=$MESSAGE" >> "$LOG_FILE"
+
+# Sanitize: remove single quotes
+SAFE_TITLE="${TITLE//''\''/}"
+SAFE_MESSAGE="${MESSAGE//''\''/}"
+
+# Windows: balloon tip via Windows Forms
+if command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden -Command "
+        Add-Type -AssemblyName System.Windows.Forms
+        \$icon = New-Object System.Windows.Forms.NotifyIcon
+        \$icon.Icon = [System.Drawing.SystemIcons]::Information
+        \$icon.BalloonTipTitle = ''$SAFE_TITLE''
+        \$icon.BalloonTipText = ''$SAFE_MESSAGE''
+        \$icon.Visible = \$true
+        \$icon.ShowBalloonTip(5000)
+        Start-Sleep -Milliseconds 5500
+        \$icon.Dispose()
+    " 2>/dev/null
+    exit 2
+fi
+
+# Linux: notify-send
+if command -v notify-send >/dev/null 2>&1; then
+    notify-send "$TITLE" "$MESSAGE" --expire-time=5000 2>/dev/null
+    exit 2
+fi
+
+# macOS: osascript
+if command -v osascript >/dev/null 2>&1; then
+    osascript -e "display notification \"$SAFE_MESSAGE\" with title \"$SAFE_TITLE\"" 2>/dev/null
+    exit 2
+fi
+
+# Last resort: terminal bell
+printf ''\a'' >/dev/tty 2>/dev/null || true
 exit 0'
         $postcompactSh = '#!/usr/bin/env bash
 CLAUDE_MD="$HOME/.claude/CLAUDE.md"
@@ -366,13 +580,139 @@ exit 0'
             }
         }
     } else {
-        $pretoolusePs1 = '# pretooluse.ps1
+        $pretoolusePs1 = '# pretooluse.ps1 - PreToolUse hook for Read tool
+# Receives JSON on stdin. Exit codes: 0=proceed, 2=intercept (stderr shown to Claude)
+
 param()
+$ErrorActionPreference = ''Stop''
+
+$MAX_DIMENSION = if ($env:CLAUDE_IMAGE_MAX_DIMENSION) { [int]$env:CLAUDE_IMAGE_MAX_DIMENSION } else { 2000 }
+$MAX_FILE_SIZE_MB = if ($env:CLAUDE_IMAGE_MAX_SIZE_MB) { [int]$env:CLAUDE_IMAGE_MAX_SIZE_MB } else { 5 }
+$QUALITY = if ($env:CLAUDE_IMAGE_QUALITY) { [int]$env:CLAUDE_IMAGE_QUALITY } else { 85 }
 $LOG_FILE = Join-Path $env:TEMP "claude-hook-validation.log"
-$inputJson = [Console]::In.ReadToEnd()
-$payload = $inputJson | ConvertFrom-Json
-$timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
-Add-Content -Path $LOG_FILE -Value "$timestamp | PreToolUse | FIRED | Tool: $($payload.tool_name)" -ErrorAction SilentlyContinue
+
+function Write-Log {
+    param([string]$Message)
+    $timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+    Add-Content -Path $LOG_FILE -Value "$timestamp | PreToolUse | $Message" -ErrorAction SilentlyContinue
+}
+
+# Read JSON from stdin
+$inputJson = $null
+try {
+    $inputJson = [Console]::In.ReadToEnd()
+    if (-not $inputJson) { Write-Log "EMPTY_INPUT"; exit 0 }
+} catch { Write-Log "STDIN_READ_ERROR | $_"; exit 0 }
+
+# Parse JSON
+$payload = $null
+try { $payload = $inputJson | ConvertFrom-Json }
+catch { Write-Log "JSON_PARSE_ERROR | $_"; exit 0 }
+
+# Only handle Read tool
+if ($payload.tool_name -ne ''Read'') { exit 0 }
+
+# Extract file path
+$filePath = $payload.tool_input.file_path
+if (-not $filePath) { $filePath = $payload.tool_input.filePath }
+if (-not $filePath) { Write-Log "NO_FILE_PATH"; exit 0 }
+
+Write-Log "FILE | $filePath"
+if (-not (Test-Path $filePath -PathType Leaf)) { Write-Log "FILE_NOT_FOUND | $filePath"; exit 0 }
+
+$extension = [System.IO.Path]::GetExtension($filePath).ToLower()
+
+# Image handling
+$imageExtensions = @(''.png'', ''.jpg'', ''.jpeg'', ''.gif'', ''.webp'', ''.bmp'', ''.tiff'', ''.tif'')
+if ($extension -in $imageExtensions) {
+    Write-Log "IMAGE_DETECTED | $filePath"
+    $magick = Get-Command magick.exe -ErrorAction SilentlyContinue
+    if (-not $magick) { Write-Log "NO_IMAGEMAGICK | Skipping resize"; exit 0 }
+    try {
+        $identify = & magick.exe identify -format "%wx%h" "$filePath" 2>$null
+        if ($identify -match ''(\d+)x(\d+)'') {
+            $width = [int]$Matches[1]; $height = [int]$Matches[2]
+            $fileSize = (Get-Item $filePath).Length
+            $maxBytes = $MAX_FILE_SIZE_MB * 1024 * 1024
+            if ($width -gt $MAX_DIMENSION -or $height -gt $MAX_DIMENSION -or $fileSize -gt $maxBytes) {
+                Write-Log "RESIZING | ${width}x${height} | $fileSize bytes"
+                $tempFile = Join-Path $env:TEMP "claude-resize-$([System.IO.Path]::GetFileName($filePath))"
+                & magick.exe "$filePath" -resize "${MAX_DIMENSION}x${MAX_DIMENSION}>" -quality $QUALITY "$tempFile" 2>$null
+                if (Test-Path $tempFile) {
+                    Copy-Item $tempFile $filePath -Force
+                    Remove-Item $tempFile -ErrorAction SilentlyContinue
+                    $newSize = (Get-Item $filePath).Length
+                    Write-Log "RESIZED | $fileSize -> $newSize bytes"
+                }
+            } else {
+                Write-Log "WITHIN_LIMITS | ${width}x${height} | $fileSize bytes"
+            }
+        }
+    } catch { Write-Log "RESIZE_ERROR | $_" }
+    exit 0
+}
+
+# PDF handling
+$pdfExtensions = @(''.pdf'')
+if ($extension -in $pdfExtensions) {
+    $pdftotext = Get-Command pdftotext.exe -ErrorAction SilentlyContinue
+    if ($pdftotext) {
+        try {
+            $tempTxt = Join-Path $env:TEMP "claude-pdf-$([guid]::NewGuid().ToString(''N'')).txt"
+            & pdftotext.exe -layout "$filePath" "$tempTxt" 2>$null
+            if (Test-Path $tempTxt) {
+                $content = Get-Content $tempTxt -Raw -ErrorAction SilentlyContinue
+                Remove-Item $tempTxt -ErrorAction SilentlyContinue
+                if ($content) {
+                    if ($content.Length -gt 9500) {
+                        $content = $content.Substring(0, 9500) + "`n`n[... TRUNCATED - file too large for hook output]"
+                    }
+                    Write-Log "PDF_CONVERTED | $filePath | $($content.Length) chars"
+                    [Console]::Error.Write("Converted PDF content from ${filePath}:`n`n$content")
+                    exit 2
+                }
+            }
+        } catch { Write-Log "PDFTOTEXT_ERROR | $_" }
+    }
+    $markitdown = Get-Command markitdown -ErrorAction SilentlyContinue
+    if ($markitdown) {
+        try {
+            $content = & markitdown "$filePath" 2>$null
+            if ($content) {
+                $contentStr = $content -join "`n"
+                if ($contentStr.Length -gt 9500) {
+                    $contentStr = $contentStr.Substring(0, 9500) + "`n`n[... TRUNCATED]"
+                }
+                Write-Log "PDF_MARKITDOWN | $filePath | $($contentStr.Length) chars"
+                [Console]::Error.Write("Converted PDF content from ${filePath}:`n`n$contentStr")
+                exit 2
+            }
+        } catch { Write-Log "MARKITDOWN_ERROR | $_" }
+    }
+    Write-Log "NO_PDF_CONVERTER | $filePath"; exit 0
+}
+
+# Office documents
+$docExtensions = @(''.docx'', ''.xlsx'', ''.pptx'', ''.doc'', ''.xls'', ''.ppt'')
+if ($extension -in $docExtensions) {
+    $markitdown = Get-Command markitdown -ErrorAction SilentlyContinue
+    if ($markitdown) {
+        try {
+            $content = & markitdown "$filePath" 2>$null
+            if ($content) {
+                $contentStr = $content -join "`n"
+                if ($contentStr.Length -gt 9500) {
+                    $contentStr = $contentStr.Substring(0, 9500) + "`n`n[... TRUNCATED]"
+                }
+                Write-Log "DOC_CONVERTED | $filePath | $($contentStr.Length) chars"
+                [Console]::Error.Write("Converted document content from ${filePath}:`n`n$contentStr")
+                exit 2
+            }
+        } catch { Write-Log "MARKITDOWN_DOC_ERROR | $_" }
+    }
+    Write-Log "NO_DOC_CONVERTER | $filePath"; exit 0
+}
+
 exit 0'
         $posttoolusePs1 = '# posttooluse.ps1
 param()
@@ -382,21 +722,118 @@ $payload = $inputJson | ConvertFrom-Json
 $timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
 Add-Content -Path $LOG_FILE -Value "$timestamp | PostToolUse | FIRED | Tool: $($payload.tool_name)" -ErrorAction SilentlyContinue
 exit 0'
-        $fileguardPs1 = '# file-guard.ps1
+        $fileguardPs1 = '# file-guard.ps1 - blocks writes to sensitive files and paths
+# Event: PreToolUse
+# Matcher: Write|Edit|MultiEdit|Bash
+# Exit 0 = allow | Exit 2 = block (stderr message shown to Claude)
+
 param()
+$ErrorActionPreference = ''Stop''
+
 $LOG_FILE = Join-Path $env:TEMP "claude-file-guard.log"
-$inputJson = [Console]::In.ReadToEnd()
-$payload = $inputJson | ConvertFrom-Json
-$timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
-Add-Content -Path $LOG_FILE -Value "[file-guard] $timestamp ALLOWED tool=$($payload.tool_name)" -ErrorAction SilentlyContinue
+
+$BLOCKED_PATTERNS = @(
+    ''\.env$''
+    ''\.env\.''
+    ''\.git/''
+    ''package-lock\.json$''
+    ''yarn\.lock$''
+    ''pnpm-lock\.yaml$''
+    ''\.ssh/''
+    ''id_rsa''
+    ''id_ed25519''
+    ''credentials\.json$''
+    ''\.aws/credentials''
+    ''\.gnupg/''
+    ''secrets\.''
+    ''\.pem$''
+    ''\.key$''
+)
+
+function Write-Log {
+    param([string]$Message)
+    $timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+    Add-Content -Path $LOG_FILE -Value "[file-guard] $timestamp $Message" -ErrorAction SilentlyContinue
+}
+
+# Read JSON from stdin
+$inputJson = $null
+try {
+    $inputJson = [Console]::In.ReadToEnd()
+    if (-not $inputJson) { exit 0 }
+} catch { exit 0 }
+
+# Parse JSON
+$payload = $null
+try { $payload = $inputJson | ConvertFrom-Json }
+catch { exit 0 }
+
+$toolName = $payload.tool_name
+$filePath = $payload.tool_input.file_path
+if (-not $filePath) { $filePath = $payload.tool_input.filePath }
+$command = $payload.tool_input.command
+
+function Block-WithReason {
+    param([string]$Path, [string]$Pattern)
+    Write-Log "BLOCKED tool=$toolName path=$Path pattern=$Pattern"
+    [Console]::Error.WriteLine("BLOCKED: ''$Path'' matches protected pattern ''$Pattern''. If you genuinely need to edit this file, the user must do it manually.")
+    exit 2
+}
+
+function Test-BlockedPath {
+    param([string]$Path)
+    if (-not $Path) { return }
+    foreach ($pattern in $BLOCKED_PATTERNS) {
+        if ($Path -match $pattern) { Block-WithReason -Path $Path -Pattern $pattern }
+    }
+}
+
+# Write / Edit / MultiEdit: check tool_input.file_path
+if ($toolName -in @(''Write'', ''Edit'', ''MultiEdit'')) { Test-BlockedPath -Path $filePath }
+
+# Bash: scan the command string for suspicious path patterns
+if ($toolName -eq ''Bash'' -and $command) {
+    foreach ($pattern in $BLOCKED_PATTERNS) {
+        if ($command -match $pattern) {
+            Write-Log "BLOCKED bash command matching pattern=$pattern"
+            [Console]::Error.WriteLine("BLOCKED: Bash command appears to touch a protected path (pattern: $pattern). If intentional, the user must run this command manually.")
+            exit 2
+        }
+    }
+}
+
+Write-Log "ALLOWED tool=$toolName path=$filePath"
 exit 0'
-        $notifyPs1 = '# notify.ps1
+        $notifyPs1 = '# notify.ps1 - Windows desktop notifications for Claude Code events
+# Event: Notification
+# Exit 2 = we handled it, suppress default notification
+
 param()
+$ErrorActionPreference = ''SilentlyContinue''
+
 $LOG_FILE = Join-Path $env:TEMP "claude-notify.log"
+
+# Read JSON from stdin
 $inputJson = [Console]::In.ReadToEnd()
 $payload = $inputJson | ConvertFrom-Json
+
+$message = if ($payload.message) { $payload.message } elseif ($payload.title) { $payload.title } else { "Claude Code notification" }
+$title = if ($payload.title) { $payload.title } else { "Claude Code" }
+
 $timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
-Add-Content -Path $LOG_FILE -Value "[notify] $timestamp title=$($payload.title)" -ErrorAction SilentlyContinue
+Add-Content -Path $LOG_FILE -Value "[notify] $timestamp title=$title msg=$message" -ErrorAction SilentlyContinue
+
+# Windows balloon tip via Windows Forms
+Add-Type -AssemblyName System.Windows.Forms
+$icon = New-Object System.Windows.Forms.NotifyIcon
+$icon.Icon = [System.Drawing.SystemIcons]::Information
+$icon.BalloonTipTitle = $title
+$icon.BalloonTipText = $message
+$icon.Visible = $true
+$icon.ShowBalloonTip(5000)
+Start-Sleep -Milliseconds 5500
+$icon.Dispose()
+
 exit 2'
         $postcompactPs1 = '# post-compact.ps1
 param()
@@ -589,6 +1026,9 @@ if ($NoContextRefresh) { Write-Host "  Context refresh after compact: DISABLED" 
 if ($AutoApprove) { Write-Host "  Auto-approve safe commands: ENABLED" -ForegroundColor Green }
 if ($AutoFormat) { Write-Host "  Auto-format after edits: ENABLED" -ForegroundColor Green }
 Write-Host ""
+
+# Always check bash availability (needed for hook generation)
+Test-Bash
 Install-Dependencies
 Set-ClaudeSettings
 New-HookScripts
