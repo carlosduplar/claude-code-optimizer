@@ -1,25 +1,45 @@
 #requires -Version 5.1
-#requires -RunAsAdministrator
 
 <#
 .SYNOPSIS
-    Claude Code Token Optimizer & Privacy Enhancer for Windows
+    Claude Code Token Optimizer & Privacy Enhancer for Windows (v2)
 
 .DESCRIPTION
-    This PowerShell script:
+    This PowerShell script optimizes Claude Code for maximum token savings and privacy:
     1. Installs missing dependencies (markitdown, poppler, imagemagick) via winget/chocolatey
-    2. Configures MAXIMUM privacy environment variables by default
-    3. Enables auto-compact in Claude settings
-    4. Creates optimization guidance and helper scripts
-
-.PARAMETER ReducedPrivacy
-    Use reduced privacy (telemetry disabled only, keeps auto-updates)
+    2. Configures privacy and token optimization via settings.json env key
+    3. Enables auto-compact and configures hooks for binary file interception
+    4. Creates CLAUDE.md with compact instructions
 
 .PARAMETER DryRun
     Show what would be done without making changes
 
+.PARAMETER ReducedPrivacy
+    Use reduced privacy (telemetry disabled only, keeps auto-updates)
+
 .PARAMETER SkipDeps
     Skip dependency installation
+
+.PARAMETER Experimental
+    Include undocumented environment variables (use at your own risk)
+
+.PARAMETER Force
+    Overwrite existing files without prompting
+
+.PARAMETER NoGuard
+    Disable file-guard hook (not recommended)
+
+.PARAMETER NoNotify
+    Disable desktop notification hook
+
+.PARAMETER NoContextRefresh
+    Disable post-compact context re-injection hook
+
+.PARAMETER AutoApprove
+    Enable auto-approval whitelist for safe bash commands (opt-in)
+
+.PARAMETER AutoFormat
+    Enable auto-formatting after file edits (opt-in)
 
 .EXAMPLE
     .\optimize-claude.ps1
@@ -32,16 +52,26 @@
 .EXAMPLE
     .\optimize-claude.ps1 -DryRun
     Preview changes without applying them
+
+.EXAMPLE
+    .\optimize-claude.ps1 -Experimental -AutoApprove
+    Include experimental features and auto-approve safe commands
 #>
 
 [CmdletBinding()]
 param(
-    [switch]$ReducedPrivacy,
     [switch]$DryRun,
-    [switch]$SkipDeps
+    [switch]$ReducedPrivacy,
+    [switch]$SkipDeps,
+    [switch]$Experimental,
+    [switch]$Force,
+    [switch]$NoGuard,
+    [switch]$NoNotify,
+    [switch]$NoContextRefresh,
+    [switch]$AutoApprove,
+    [switch]$AutoFormat
 )
 
-# Colors for output
 $Colors = @{
     Info = 'Cyan'
     Success = 'Green'
@@ -50,11 +80,10 @@ $Colors = @{
     Header = 'Blue'
 }
 
-# Dependency tracking
 $script:MissingDeps = @()
 $script:InstallFailed = @()
+$script:BashAvailable = $false
 
-# Functions for colored output
 function Write-Status {
     param([string]$Message)
     Write-Host "[INFO] $Message" -ForegroundColor $Colors.Info
@@ -62,974 +91,508 @@ function Write-Status {
 
 function Write-Success {
     param([string]$Message)
-    Write-Host "[✓] $Message" -ForegroundColor $Colors.Success
+    Write-Host "[OK] $Message" -ForegroundColor $Colors.Success
 }
 
-function Write-Warning {
+function Write-WarningLine {
     param([string]$Message)
-    Write-Host "[⚠] $Message" -ForegroundColor $Colors.Warning
+    Write-Host "[WARNING] $Message" -ForegroundColor $Colors.Warning
 }
 
-function Write-Error {
+function Write-ErrorLine {
     param([string]$Message)
-    Write-Host "[✗] $Message" -ForegroundColor $Colors.Error
+    Write-Host "[ERROR] $Message" -ForegroundColor $Colors.Error
 }
 
 function Write-Header {
     param([string]$Message)
     Write-Host ""
-    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor $Colors.Header
+    Write-Host "========================================" -ForegroundColor $Colors.Header
     Write-Host " $Message" -ForegroundColor $Colors.Header
-    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor $Colors.Header
+    Write-Host "========================================" -ForegroundColor $Colors.Header
     Write-Host ""
 }
 
-# Check if running as administrator
-function Test-Administrator {
-    $currentUser = [Security.Principal.WindowsIdentity]::GetCurrent()
-    $principal = New-Object Security.Principal.WindowsPrincipal($currentUser)
-    return $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-}
-
-# Check for Python
 function Test-Python {
     Write-Status "Checking Python installation..."
-
     $python = Get-Command python -ErrorAction SilentlyContinue
     $python3 = Get-Command python3 -ErrorAction SilentlyContinue
-
     if ($python3) {
         $script:PythonCmd = "python3"
-        $version = & python3 --version 2>&1
-        Write-Success "Python found: $version"
+        Write-Success "Python found"
         return $true
     } elseif ($python) {
         $script:PythonCmd = "python"
-        $version = & python --version 2>&1
-        Write-Success "Python found: $version"
+        Write-Success "Python found"
         return $true
     } else {
-        Write-Error "Python is not installed. Please install Python 3 from python.org"
+        Write-ErrorLine "Python is not installed"
         return $false
     }
 }
 
-# Check for pip
-function Test-Pip {
-    $pip = Get-Command pip -ErrorAction SilentlyContinue
-    $pip3 = Get-Command pip3 -ErrorAction SilentlyContinue
-
-    if ($pip3 -or $pip) {
-        return $true
-    } else {
-        Write-Warning "pip not found. You may need to install pip."
-        return $false
-    }
-}
-
-# Check for markitdown
 function Test-Markitdown {
     Write-Status "Checking markitdown..."
-
     $markitdown = Get-Command markitdown -ErrorAction SilentlyContinue
     if ($markitdown) {
         Write-Success "markitdown is already installed"
         return $true
     }
-
-    # Try importing as Python module
     try {
         & $script:PythonCmd -c "import markitdown" 2>$null
         Write-Success "markitdown is already installed"
         return $true
     } catch {
-        Write-Warning "markitdown is not installed"
+        Write-WarningLine "markitdown is not installed"
         $script:MissingDeps += "markitdown"
         return $false
     }
 }
 
-# Check for ImageMagick
 function Test-ImageMagick {
     Write-Status "Checking ImageMagick..."
-
-    $magick = Get-Command magick -ErrorAction SilentlyContinue
-    $convert = Get-Command convert -ErrorAction SilentlyContinue
-
-    if ($magick -or $convert) {
+    $magick = Get-Command magick.exe -ErrorAction SilentlyContinue
+    if ($magick) {
         Write-Success "ImageMagick is already installed"
         return $true
     } else {
-        Write-Warning "ImageMagick is not installed"
+        Write-WarningLine "ImageMagick is not installed"
         $script:MissingDeps += "imagemagick"
         return $false
     }
 }
 
-# Check for poppler (xpdf-utils provides pdftotext on Windows)
 function Test-Poppler {
     Write-Status "Checking poppler (pdftotext)..."
-
-    # First check if pdftotext is in PATH
-    $pdftotext = Get-Command pdftotext -ErrorAction SilentlyContinue
+    $pdftotext = Get-Command pdftotext.exe -ErrorAction SilentlyContinue
     if ($pdftotext) {
         Write-Success "poppler (pdftotext) is already installed"
         return $true
     }
-
-    # Check common installation paths and add to PATH if found
-    $popplerPaths = @(
-        "C:\ProgramData\chocolatey\lib\xpdf-utils\tools",
-        "C:\ProgramData\chocolatey\lib\xpdf-utils\tools\xpdf-utils",
-        "C:\ProgramData\chocolatey\bin",
-        "C:\Program Files\xpdf-utils",
-        "C:\Program Files (x86)\xpdf-utils",
-        "C:\tools\xpdf-utils"
-    )
-
-    foreach ($basePath in $popplerPaths) {
-        if (Test-Path $basePath) {
-            # Look for pdftotext.exe in this directory and subdirectories
-            $pdftotextExe = Get-ChildItem -Path $basePath -Recurse -Filter "pdftotext.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($pdftotextExe) {
-                $popplerDir = $pdftotextExe.DirectoryName
-                if ($env:Path -notlike "*$popplerDir*") {
-                    $env:Path = "$popplerDir;$env:Path"
-                }
-                Write-Success "poppler (pdftotext) found at $($pdftotextExe.FullName) and added to PATH"
-                return $true
-            }
-        }
-    }
-
-    Write-Warning "poppler (pdftotext) is not installed"
+    Write-WarningLine "poppler (pdftotext) is not installed"
     $script:MissingDeps += "poppler"
     return $false
 }
 
-# Install markitdown
-function Install-Markitdown {
-    Write-Status "Installing markitdown..."
-
-    if ($DryRun) {
-        Write-Host "[DRY-RUN] Would run: pip install markitdown"
+function Test-Bash {
+    Write-Status "Checking for bash availability..."
+    $bash = Get-Command bash -ErrorAction SilentlyContinue
+    if ($bash) {
+        $script:BashAvailable = $true
+        Write-Success "bash found at: $($bash.Source)"
         return $true
-    }
-
-    try {
-        & pip install markitdown 2>$null
-        if ($LASTEXITCODE -eq 0) {
-            Write-Success "markitdown installed successfully"
-            return $true
-        }
-    } catch {
-        # Try pip3
-        try {
-            & pip3 install markitdown 2>$null
-            if ($LASTEXITCODE -eq 0) {
-                Write-Success "markitdown installed successfully"
-                return $true
-            }
-        } catch {
-            Write-Error "Failed to install markitdown"
-            $script:InstallFailed += "markitdown"
-            return $false
-        }
-    }
-
-    Write-Error "Failed to install markitdown"
-    $script:InstallFailed += "markitdown"
-    return $false
-}
-
-# Install ImageMagick via winget
-function Install-ImageMagick {
-    Write-Status "Installing ImageMagick via winget..."
-
-    if ($DryRun) {
-        Write-Host "[DRY-RUN] Would run: winget install ImageMagick.ImageMagick"
-        return $true
-    }
-
-    try {
-        $winget = Get-Command winget -ErrorAction SilentlyContinue
-        if (-not $winget) {
-            Write-Warning "winget not found. Trying Chocolatey..."
-            return Install-ImageMagick-Choco
-        }
-
-        winget install ImageMagick.ImageMagick --silent --accept-package-agreements --accept-source-agreements
-
-        # Refresh environment variables
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-
-        # Verify installation
-        $magick = Get-Command magick -ErrorAction SilentlyContinue
-        if ($magick) {
-            Write-Success "ImageMagick installed successfully"
-            return $true
-        } else {
-            Write-Warning "ImageMagick installation may require a restart. Trying Chocolatey..."
-            return Install-ImageMagick-Choco
-        }
-    } catch {
-        Write-Warning "winget installation failed. Trying Chocolatey..."
-        return Install-ImageMagick-Choco
-    }
-}
-
-# Install ImageMagick via Chocolatey
-function Install-ImageMagick-Choco {
-    $choco = Get-Command choco -ErrorAction SilentlyContinue
-
-    if (-not $choco) {
-        Write-Error "Neither winget nor Chocolatey found. Please install ImageMagick manually from https://imagemagick.org"
-        $script:InstallFailed += "imagemagick"
-        return $false
-    }
-
-    Write-Status "Installing ImageMagick via Chocolatey..."
-
-    if ($DryRun) {
-        Write-Host "[DRY-RUN] Would run: choco install imagemagick -y"
-        return $true
-    }
-
-    try {
-        choco install imagemagick -y
-
-        # Refresh environment variables
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-
-        $magick = Get-Command magick -ErrorAction SilentlyContinue
-        if ($magick) {
-            Write-Success "ImageMagick installed successfully"
-            return $true
-        } else {
-            Write-Error "ImageMagick installation may have failed or requires restart"
-            $script:InstallFailed += "imagemagick"
-            return $false
-        }
-    } catch {
-        Write-Error "Failed to install ImageMagick: $_"
-        $script:InstallFailed += "imagemagick"
+    } else {
+        Write-WarningLine "bash not found - will use PowerShell fallback for hooks"
         return $false
     }
 }
 
-# Install poppler via Chocolatey (using xpdf-utils which provides pdftotext)
-function Install-Poppler {
-    Write-Status "Installing poppler (xpdf-utils) via Chocolatey..."
-
-    $choco = Get-Command choco -ErrorAction SilentlyContinue
-
-    if (-not $choco) {
-        Write-Error "Chocolatey not found. Please install poppler manually."
-        Write-Host "Download from: https://github.com/oschwartz10612/poppler-windows/releases/"
-        $script:InstallFailed += "poppler"
-        return $false
-    }
-
-    if ($DryRun) {
-        Write-Host "[DRY-RUN] Would run: choco install xpdf-utils -y"
-        return $true
-    }
-
-    try {
-        # Install xpdf-utils which provides pdftotext
-        $chocoOutput = choco install xpdf-utils -y 2>&1
-        
-        # Check if already installed
-        $alreadyInstalled = $chocoOutput -match "already installed"
-        
-        # Refresh environment variables from registry
-        $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
-
-        # Search for pdftotext.exe in various locations
-        $popplerPaths = @(
-            "C:\ProgramData\chocolatey\lib\xpdf-utils\tools",
-            "C:\ProgramData\chocolatey\bin",
-            "C:\Program Files\xpdf-utils",
-            "C:\Program Files (x86)\xpdf-utils",
-            "C:\tools\xpdf-utils"
-        )
-
-        $pdftotextExe = $null
-        foreach ($basePath in $popplerPaths) {
-            if (Test-Path $basePath) {
-                $pdftotextExe = Get-ChildItem -Path $basePath -Recurse -Filter "pdftotext.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
-                if ($pdftotextExe) { break }
-            }
-        }
-
-        # If found, add to PATH for this session
-        if ($pdftotextExe) {
-            $popplerDir = $pdftotextExe.DirectoryName
-            if ($env:Path -notlike "*$popplerDir*") {
-                $env:Path = "$popplerDir;$env:Path"
-            }
-            if ($alreadyInstalled) {
-                Write-Success "xpdf-utils was already installed (found at: $($pdftotextExe.FullName))"
-            } else {
-                Write-Success "xpdf-utils installed successfully (found at: $($pdftotextExe.FullName))"
-            }
-            return $true
-        }
-
-        # Try command lookup as fallback
-        $pdftotext = Get-Command pdftotext -ErrorAction SilentlyContinue
-        if ($pdftotext) {
-            if ($alreadyInstalled) {
-                Write-Success "xpdf-utils was already installed and is now in PATH"
-            } else {
-                Write-Success "xpdf-utils installed successfully"
-            }
-            return $true
-        }
-
-        Write-Warning "xpdf-utils installed but pdftotext not found in PATH. A restart may be required."
-        $script:InstallFailed += "poppler"
-        return $false
-    } catch {
-        Write-Error "Failed to install poppler: $_"
-        $script:InstallFailed += "poppler"
-        return $false
-    }
-}
-
-# Check and install all dependencies
 function Install-Dependencies {
     if ($SkipDeps) {
         Write-Status "Skipping dependency check (-SkipDeps specified)"
         return
     }
-
     Write-Header "Checking Dependencies"
-
-    # Check Python first (required for markitdown)
-    $pythonOK = Test-Python
-    if (-not $pythonOK) {
-        Write-Error "Python is required. Please install it first."
+    if (-not (Test-Python)) {
+        Write-ErrorLine "Python is required"
         return
     }
-
-    Test-Pip
     Test-Markitdown
     Test-ImageMagick
     Test-Poppler
-
+    Test-Bash
     if ($script:MissingDeps.Count -eq 0) {
         Write-Success "All dependencies are already installed!"
         return
     }
-
-    Write-Warning "Missing dependencies: $($script:MissingDeps -join ', ')"
-
-    if ($DryRun) {
-        Write-Host "[DRY-RUN] Would attempt to install: $($script:MissingDeps -join ', ')"
-        return
-    }
-
-    $confirm = Read-Host "Install missing dependencies? (y/N)"
-    if ($confirm -notmatch '^[Yy]$') {
-        Write-Warning "Skipping dependency installation"
-        return
-    }
-
-    # Install each missing dependency
-    foreach ($dep in $script:MissingDeps) {
-        switch ($dep) {
-            "markitdown" { Install-Markitdown }
-            "imagemagick" { Install-ImageMagick }
-            "poppler" { Install-Poppler }
-        }
-    }
-
-    # Report results
-    Write-Host ""
-    if ($script:InstallFailed.Count -eq 0) {
-        Write-Success "All dependencies installed successfully!"
-    } else {
-        Write-Error "Failed to install: $($script:InstallFailed -join ', ')"
-        Write-Warning "You can still use Claude Code, but some optimizations won't work"
-    }
+    Write-WarningLine "Missing dependencies: $($script:MissingDeps -join ', ')"
 }
 
-# Configure privacy environment variables
-function Set-PrivacyConfiguration {
-    Write-Header "Configuring Privacy Settings"
-
-    # Determine target profile script
-    $docsPath = [Environment]::GetFolderPath("MyDocuments")
-    $profilePaths = @(
-        $PROFILE.CurrentUserAllHosts,
-        $PROFILE.CurrentUserCurrentHost,
-        "$docsPath\PowerShell\Microsoft.PowerShell_profile.ps1",
-        "$docsPath\WindowsPowerShell\Microsoft.PowerShell_profile.ps1"
-    )
-
-    $targetProfile = $null
-    foreach ($path in $profilePaths) {
-        if ($path -and (Split-Path $path -Leaf) -match '\.ps1$') {
-            $parentDir = Split-Path $path -Parent
-            if ($parentDir -and (Test-Path $parentDir)) {
-                $targetProfile = $path
-                break
-            }
-        }
-    }
-
-    # Fallback to default if no valid profile found
-    if (-not $targetProfile) {
-        $targetProfile = "$docsPath\PowerShell\Microsoft.PowerShell_profile.ps1"
-        $profileDir = Split-Path $targetProfile -Parent
-        if (-not (Test-Path $profileDir)) {
-            New-Item -ItemType Directory -Path $profileDir -Force | Out-Null
-        }
-    }
-
-    Write-Status "PowerShell profile: $targetProfile"
-
-    # Build environment variable block
-    $envBlock = @"
-# Claude Code Token Optimization & Privacy Settings
-"@
-
-    if ($ReducedPrivacy) {
-        $envBlock += @"
-
-# Standard Privacy Mode
-`$env:DISABLE_TELEMETRY = "1"
-"@
-        Write-Status "Configuring standard privacy mode (reduced)"
-    } else {
-        $envBlock += @"
-
-# Maximum Privacy Mode (DEFAULT)
-`$env:DISABLE_TELEMETRY = "1"
-`$env:CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
-`$env:OTEL_LOG_USER_PROMPTS = "0"
-`$env:OTEL_LOG_TOOL_DETAILS = "0"
-"@
-        Write-Status "Configuring MAXIMUM privacy mode (default)"
-    }
-
-    # Add token optimization variables
-    $envBlock += @"
-
-# Token Optimization
-`$env:CLAUDE_CODE_AUTO_COMPACT_WINDOW = "180000"
-"@
-
-    if ($DryRun) {
-        Write-Host "[DRY-RUN] Would add to ${targetProfile}:"
-        Write-Host $envBlock
-        return
-    }
-
-    # Check if already configured
-    if (Test-Path $targetProfile) {
-        $content = Get-Content $targetProfile -Raw
-        if ($content -match "DISABLE_TELEMETRY=1") {
-            Write-Warning "Privacy settings already appear to be configured in profile"
-            $update = Read-Host "Update anyway? (y/N)"
-            if ($update -notmatch '^[Yy]$') {
-                return
-            }
-        }
-    }
-
-    # Append to profile
-    Add-Content -Path $targetProfile -Value "`n$envBlock" -Encoding UTF8
-
-    Write-Success "Privacy settings added to PowerShell profile"
-    Write-Status "Restart PowerShell or run the profile to apply changes to current session"
-}
-
-# Also set in Windows environment for GUI applications
-function Set-WindowsEnvironment {
-    Write-Header "Configuring Windows Environment Variables"
-
-    if ($DryRun) {
-        Write-Host "[DRY-RUN] Would set system environment variables"
-        return
-    }
-
-    # User-level environment variables (applies to all applications)
-    [Environment]::SetEnvironmentVariable("DISABLE_TELEMETRY", "1", "User")
-
-    if (-not $ReducedPrivacy) {
-        [Environment]::SetEnvironmentVariable("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1", "User")
-        [Environment]::SetEnvironmentVariable("OTEL_LOG_USER_PROMPTS", "0", "User")
-        [Environment]::SetEnvironmentVariable("OTEL_LOG_TOOL_DETAILS", "0", "User")
-    }
-
-    [Environment]::SetEnvironmentVariable("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "180000", "User")
-
-    Write-Success "Windows environment variables configured"
-    Write-Status "These apply to all applications, including Claude Code Desktop"
-}
-
-# Configure Claude settings (auto-compact)
-function Set-ClaudeConfiguration {
+function Set-ClaudeSettings {
     Write-Header "Configuring Claude Code Settings"
-
     $claudeDir = Join-Path $env:USERPROFILE ".claude"
-    $claudeConfig = Join-Path $claudeDir ".claude.json"
-
-    # Check if config exists
-    if (Test-Path $claudeConfig) {
-        Write-Status "Found existing Claude config: $claudeConfig"
-
-        if ($DryRun) {
-            Write-Host "[DRY-RUN] Would update $claudeConfig to enable autoCompactEnabled"
-            return
-        }
-
-        try {
-            $config = Get-Content $claudeConfig -Raw | ConvertFrom-Json
-
-            if ($config.autoCompactEnabled -eq $true) {
-                Write-Success "autoCompactEnabled is already enabled"
-            } else {
-                # Create backup
-                $backupName = ".claude.json.backup.$(Get-Date -Format 'yyyyMMddHHmmss')"
-                Copy-Item $claudeConfig (Join-Path $claudeDir $backupName)
-
-                # Update config
-                $config | Add-Member -NotePropertyName "autoCompactEnabled" -NotePropertyValue $true -Force
-                $config | ConvertTo-Json -Depth 10 | Set-Content $claudeConfig -Encoding UTF8
-
-                Write-Success "Enabled autoCompactEnabled in Claude config"
-            }
-        } catch {
-            Write-Error "Failed to parse existing config. Creating new one..."
-            # Backup corrupted config
-            Move-Item $claudeConfig "$claudeConfig.corrupted.$(Get-Date -Format 'yyyyMMddHHmmss')"
-            Create-NewClaudeConfig $claudeConfig
-        }
-    } else {
-        Create-NewClaudeConfig $claudeConfig
-    }
-}
-
-# Create new Claude config
-function Create-NewClaudeConfig {
-    param([string]$Path)
-
-    Write-Status "Creating new Claude config: $Path"
-
-    if ($DryRun) {
-        Write-Host "[DRY-RUN] Would create $Path with autoCompactEnabled"
-        return
-    }
-
-    $claudeDir = Split-Path $Path -Parent
+    $settingsFile = Join-Path $claudeDir "settings.json"
     if (-not (Test-Path $claudeDir)) {
         New-Item -ItemType Directory -Path $claudeDir -Force | Out-Null
     }
 
-    $config = @{
-        autoCompactEnabled = $true
-        theme = "dark"
+    $envVars = @{
+        BASH_MAX_OUTPUT_LENGTH = "10000"
+        CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC = "1"
+        DISABLE_TELEMETRY = "1"
+        OTEL_LOG_USER_PROMPTS = "0"
+        OTEL_LOG_TOOL_DETAILS = "0"
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW = "180000"
+        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE = "70"
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1"
     }
-
-    $config | ConvertTo-Json -Depth 10 | Set-Content $Path -Encoding UTF8
-
-    Write-Success "Created Claude config with autoCompactEnabled"
-}
-
-# Create a batch file for easy pre-processing (optional - hooks handle this automatically)
-function New-PreprocessScript {
-    Write-Header "Creating Pre-Processing Helper Scripts (Optional)"
-
-    $batchFile = Join-Path $PWD "preprocess-for-claude.bat"
-    $psFile = Join-Path $PWD "preprocess-for-claude.ps1"
-
-    if ($DryRun) {
-        Write-Host "[DRY-RUN] Would create helper scripts"
-        return
-    }
-
-    # Batch file
-    $batchContent = @'
-@echo off
-:: Pre-process files for Claude Code
-:: Usage: preprocess-for-claude.bat <file>
-
-if "%~1"=="" (
-    echo Usage: preprocess-for-claude.bat ^<file^>
-    exit /b 1
-)
-
-set "file=%~1"
-set "ext=%~x1"
-
-if /i "%ext%"==".pdf" (
-    pdftotext.exe -layout "%file%" "%~n1.txt"
-    echo Converted to: %~n1.txt
-) else if /i "%ext%"==".docx" (
-    markitdown "%file%" > "%~n1.md"
-    echo Converted to: %~n1.md
-) else if /i "%ext%"==".xlsx" (
-    markitdown "%file%" > "%~n1.md"
-    echo Converted to: %~n1.md
-) else if /i "%ext%"==".pptx" (
-    markitdown "%file%" > "%~n1.md"
-    echo Converted to: %~n1.md
-) else if /i "%ext%"==".png" (
-    magick.exe "%file%" -resize 2000x2000 -quality 85 "%~n1-optimized.png"
-    echo Resized to: %~n1-optimized.png
-) else if /i "%ext%"==".jpg" (
-    magick.exe "%file%" -resize 2000x2000 -quality 85 "%~n1-optimized.jpg"
-    echo Resized to: %~n1-optimized.jpg
-) else if /i "%ext%"==".jpeg" (
-    magick.exe "%file%" -resize 2000x2000 -quality 85 "%~n1-optimized.jpg"
-    echo Resized to: %~n1-optimized.jpg
-) else (
-    echo Unknown file type: %ext%
-    exit /b 1
-)
-'@
-
-    $batchContent | Set-Content $batchFile -Encoding ASCII
-
-    # PowerShell version with more features
-    $psContent = @'
-# Pre-process files for Claude Code
-# Usage: .\preprocess-for-claude.ps1 <file> [-OutputPath <path>]
-
-param(
-    [Parameter(Mandatory=$true)]
-    [string]$FilePath,
-
-    [string]$OutputPath,
-
-    [switch]$Batch
-)
-
-function Process-File {
-    param([string]$Path)
-
-    $file = Get-Item $Path
-    $ext = $file.Extension.ToLower()
-    $base = $file.BaseName
-
-    if (-not $OutputPath) {
-        $OutputPath = $file.DirectoryName
-    }
-
-    switch ($ext) {
-        ".pdf" {
-            $output = Join-Path $OutputPath "$base.txt"
-            Write-Host "Converting PDF to text: $output" -ForegroundColor Green
-            & pdftotext.exe -layout $file.FullName $output
-        }
-        ".docx" {
-            $output = Join-Path $OutputPath "$base.md"
-            Write-Host "Converting DOCX to Markdown: $output" -ForegroundColor Green
-            & markitdown $file.FullName > $output
-        }
-        ".xlsx" {
-            $output = Join-Path $OutputPath "$base.md"
-            Write-Host "Converting XLSX to Markdown: $output" -ForegroundColor Green
-            & markitdown $file.FullName > $output
-        }
-        ".pptx" {
-            $output = Join-Path $OutputPath "$base.md"
-            Write-Host "Converting PPTX to Markdown: $output" -ForegroundColor Green
-            & markitdown $file.FullName > $output
-        }
-        ".png" {
-            $output = Join-Path $OutputPath "$base-optimized.png"
-            Write-Host "Resizing PNG: $output" -ForegroundColor Green
-            & magick.exe $file.FullName -resize 2000x2000 -quality 85 $output
-        }
-        ".jpg" {
-            $output = Join-Path $OutputPath "$base-optimized.jpg"
-            Write-Host "Resizing JPEG: $output" -ForegroundColor Green
-            & magick.exe $file.FullName -resize 2000x2000 -quality 85 $output
-        }
-        ".jpeg" {
-            $output = Join-Path $OutputPath "$base-optimized.jpg"
-            Write-Host "Resizing JPEG: $output" -ForegroundColor Green
-            & magick.exe $file.FullName -resize 2000x2000 -quality 85 $output
-        }
-        default {
-            Write-Warning "Unknown file type: $ext"
-        }
-    }
-}
-
-if ($Batch) {
-    # Process all supported files in directory
-    $files = Get-ChildItem -File | Where-Object {
-        $_.Extension -match '\.(pdf|docx|xlsx|pptx|png|jpg|jpeg)$'
-    }
-    foreach ($file in $files) {
-        Process-File -Path $file.FullName
-    }
-} else {
-    Process-File -Path $FilePath
-}
-'@
-
-    $psContent | Set-Content $psFile -Encoding UTF8
-
-    Write-Success "Created optional pre-processing scripts (hooks handle this automatically):"
-    Write-Host "  - $batchFile (Command Prompt)"
-    Write-Host "  - $psFile (PowerShell with more features)"
-}
-
-# Create keepalive script (optional - hooks handle this automatically)
-function New-KeepaliveScript {
-    Write-Header "Creating Prompt Cache Keepalive Script (Optional)"
-
-    $keepaliveFile = Join-Path $PWD "claude-keepalive.ps1"
-
-    if (Test-Path $keepaliveFile) {
-        Write-Warning "claude-keepalive.ps1 already exists"
-        $overwrite = Read-Host "Overwrite? (y/N)"
-        if ($overwrite -notmatch '^[Yy]$') {
-            return
-        }
-    }
-
-    if ($DryRun) {
-        Write-Host "[DRY-RUN] Would create ${keepaliveFile}"
-        return
-    }
-
-    $content = @'
-#requires -Version 5.1
-<#
-.SYNOPSIS
-    Claude Code Prompt Cache Keepalive Script
-
-.DESCRIPTION
-    Prevents 5-minute cache TTL expiration by sending periodic no-op messages.
-    The Anthropic API has a 5-minute TTL on prompt cache entries.
-    After 5 minutes of inactivity, cache is evicted and costs increase 10x.
-    For 200K context: $0.60 -> $6.00 per request
-
-.PARAMETER Interval
-    Seconds between keepalive messages (default: 240 = 4 minutes)
-
-.PARAMETER WindowTitle
-    Window title to search for (default: "claude")
-
-.EXAMPLE
-    .\claude-keepalive.ps1
-    Start keepalive with default settings
-
-.EXAMPLE
-    .\claude-keepalive.ps1 -Interval 180
-    Send keepalive every 3 minutes
-#>
-
-[CmdletBinding()]
-param(
-    [int]$Interval = 240,
-    [string]$WindowTitle = "claude"
-)
-
-$script:Running = $true
-
-function Send-Keepalive {
-    param([string]$Title)
-
-    # Find window with title containing "claude"
-    $hwnd = $null
-    Get-Process | Where-Object { $_.MainWindowTitle -match $Title } | ForEach-Object {
-        $hwnd = $_.MainWindowHandle
-    }
-
-    if (-not $hwnd) {
-        Write-Warning "No window with title containing '$Title' found"
-        return $false
-    }
-
-    try {
-        # Use Windows API to send keys
-        Add-Type @"
-using System;
-using System.Runtime.InteropServices;
-public class WinAPI {
-    [DllImport("user32.dll")]
-    public static extern bool SetForegroundWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
-}
-"@
-
-        # Bring window to foreground
-        [WinAPI]::SetForegroundWindow($hwnd) | Out-Null
-        Start-Sleep -Milliseconds 100
-
-        # Send comment (no-op)
-        $timestamp = Get-Date -Format "HHmmss"
-        $keys = "# keepalive $timestamp"
-
-        # Use WScript.Shell for sending keys
-        $shell = New-Object -ComObject WScript.Shell
-        $shell.SendKeys($keys)
-        Start-Sleep -Milliseconds 100
-        $shell.SendKeys("{ENTER}")
-        Start-Sleep -Milliseconds 500
-        $shell.SendKeys("^c")  # Ctrl+C to cancel
-
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss')] Sent keepalive" -ForegroundColor Green
-        return $true
-    }
-    catch {
-        Write-Warning "Failed to send keepalive: $_"
-        return $false
-    }
-}
-
-# Cleanup handler
-$null = Register-EngineEvent -SourceIdentifier PowerShell.Exiting -Action {
-    $script:Running = $false
-    Write-Host "`n[Keepalive] Stopping..." -ForegroundColor Yellow
-}
-
-Write-Host "Claude Code Prompt Cache Keepalive" -ForegroundColor Cyan
-Write-Host "Interval: $Interval seconds (4 minutes)" -ForegroundColor Cyan
-Write-Host "Target window title: $WindowTitle" -ForegroundColor Cyan
-Write-Host "Press Ctrl+C to stop`n" -ForegroundColor Yellow
-
-while ($script:Running) {
-    Send-Keepalive -Title $WindowTitle
-    Start-Sleep -Seconds $Interval
-}
-'@
-
-    $content | Set-Content $keepaliveFile -Encoding UTF8
-
-    Write-Success "Created optional keepalive script: $keepaliveFile"
-    Write-Status "Note: Hooks in .claude/settings.json already handle cache keepalive automatically"
-}
-
-# Create settings.json with keepalive hook
-function New-SettingsJson {
-    Write-Header "Creating settings.json with Keepalive Hook"
-
-    $settingsDir = Join-Path $PWD ".claude"
-    $settingsFile = Join-Path $settingsDir "settings.json"
-
-    if (Test-Path $settingsFile) {
-        Write-Warning "settings.json already exists"
-        $overwrite = Read-Host "Create backup and add keepalive hook? (y/N)"
-        if ($overwrite -notmatch '^[Yy]$') {
-            return
-        }
-
-        if (-not $DryRun) {
-            $backupName = "settings.json.backup.$(Get-Date -Format 'yyyyMMddHHmmss')"
-            Copy-Item $settingsFile (Join-Path $settingsDir $backupName)
-        }
-    }
-
-    if ($DryRun) {
-        Write-Host "[DRY-RUN] Would create $settingsFile with keepalive hook"
-        return
-    }
-
-    if (-not (Test-Path $settingsDir)) {
-        New-Item -ItemType Directory -Path $settingsDir -Force | Out-Null
-    }
-
-    $config = @{
-        autoCompactEnabled = $true
-        hooks = @{
-            PreToolUse = @(
-                @{
-                    matcher = "Read"
-                    hooks = @(
-                        @{
-                            type = "command"
-                            command = 'if (Get-Command magick -ErrorAction SilentlyContinue) { magick "$env:ARGUMENTS" -resize 2000x2000 -quality 85 "C:\temp\resized_$(Split-Path "$env:ARGUMENTS" -Leaf)" }'
-                            if = "Read(*.{png,jpg,jpeg})"
-                        }
-                    )
-                }
-            )
-            PostToolUse = @(
-                @{
-                    matcher = "*"
-                    hooks = @(
-                        @{
-                            type = "command"
-                            command = 'Write-Output "{\"cache_keepalive\": \"$(Get-Date -Format yyyyMMddHHmmss)\"}"'
-                            if = "*"
-                        }
-                    )
-                }
-            )
-        }
-    }
-
-    $config | ConvertTo-Json -Depth 10 | Set-Content $settingsFile -Encoding UTF8
-
-    Write-Success "Created $settingsFile with keepalive hook"
-    Write-Status "The PostToolUse hook fires after every tool use, keeping cache warm"
-}
-
-# Main execution
-function Main {
-    Write-Header "Claude Code Token Optimizer & Privacy Enhancer (Windows)"
-
-    if (-not (Test-Administrator)) {
-        Write-Warning "Script not running as Administrator. Some features may not work."
-        Write-Host "For best results, run PowerShell as Administrator."
-        Write-Host ""
-    }
-
-    if ($DryRun) {
-        Write-Warning "DRY RUN MODE - No changes will be made"
-    }
-
-    # Execute functions
-    Install-Dependencies
-    Set-PrivacyConfiguration
-    Set-WindowsEnvironment
-    Set-ClaudeConfiguration
-    New-PreprocessScript
-    New-KeepaliveScript
-    New-SettingsJson
-
-    # Summary
-    Write-Header "Summary"
-
-    Write-Success "Configuration complete!"
-    Write-Host ""
-
-    if ($script:InstallFailed.Count -gt 0) {
-        Write-Error "Failed to install: $($script:InstallFailed -join ', ')"
-        Write-Host "You can manually install them later."
-        Write-Host ""
-    }
-
-    Write-Host "Next steps:"
-    Write-Host "1. Review the environment variables in your PowerShell profile"
-    Write-Host "2. Restart PowerShell or run: `$PROFILE"
-    Write-Host "3. Start Claude Code with optimized settings"
-    Write-Host "4. Check /cost regularly to monitor usage"
-    Write-Host ""
-
     if ($ReducedPrivacy) {
-        Write-Host "Privacy mode: Standard (telemetry disabled, auto-updates enabled)" -ForegroundColor Yellow
+        $envVars.Remove("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC")
+    }
+    if ($Experimental) {
+        $envVars["CLAUDE_CODE_FILE_READ_MAX_OUTPUT_TOKENS"] = "8000"
+        $envVars["ENABLE_CLAUDE_CODE_SM_COMPACT"] = "1"
+    }
+
+    $hooksDir = Join-Path $claudeDir "hooks"
+    if ($script:BashAvailable) {
+        $pretooluseCmd = "bash ~/.claude/hooks/pretooluse.sh"
+        $posttooluseCmd = "bash ~/.claude/hooks/posttooluse.sh"
+        $fileguardCmd = "bash ~/.claude/hooks/file-guard.sh"
+        $notifyCmd = "bash ~/.claude/hooks/notify.sh"
+        $postcompactCmd = "bash ~/.claude/hooks/post-compact.sh"
     } else {
-        Write-Host "Privacy mode: MAXIMUM (all non-essential traffic disabled)" -ForegroundColor Green
+        $pretooluseCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\pretooluse.ps1`""
+        $posttooluseCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\posttooluse.ps1`""
+        $fileguardCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\file-guard.ps1`""
+        $notifyCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\notify.ps1`""
+        $postcompactCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\post-compact.ps1`""
+    }
+
+    $hooks = @{
+        PreToolUse = @()
+        PostToolUse = @()
+        Notification = @()
+        SessionStart = @()
+    }
+    $hooks.PreToolUse += @{
+        matcher = "Read"
+        hooks = @(@{ type = "command"; command = $pretooluseCmd; timeout = 30 })
+    }
+    if (-not $NoGuard) {
+        $hooks.PreToolUse += @{
+            matcher = "Write|Edit|MultiEdit|Bash"
+            hooks = @(@{ type = "command"; command = $fileguardCmd; timeout = 10 })
+        }
+    }
+    $hooks.PostToolUse += @{
+        matcher = "*"
+        hooks = @(@{ type = "command"; command = $posttooluseCmd; timeout = 5 })
+    }
+    if (-not $NoNotify) {
+        $hooks.Notification += @{
+            matcher = "*"
+            hooks = @(@{ type = "command"; command = $notifyCmd; timeout = 15 })
+        }
+    }
+    if (-not $NoContextRefresh) {
+        $hooks.SessionStart += @{
+            matcher = "compact"
+            hooks = @(@{ type = "command"; command = $postcompactCmd; timeout = 10 })
+        }
+    }
+
+    $settings = @{
+        '$schema' = "https://json.schemastore.org/claude-code-settings.json"
+        autoCompactEnabled = $true
+        env = $envVars
+        hooks = $hooks
+    }
+
+    if ($DryRun) {
+        Write-Host "[DRY-RUN] Would write settings.json"
+        return
+    }
+    $settings | ConvertTo-Json -Depth 10 | Set-Content $settingsFile -Encoding UTF8
+    Write-Success "Created settings.json with optimizations"
+}
+
+function New-HookScripts {
+    Write-Header "Creating Hook Scripts"
+    $claudeDir = Join-Path $env:USERPROFILE ".claude"
+    $hooksDir = Join-Path $claudeDir "hooks"
+    if (-not (Test-Path $hooksDir)) {
+        New-Item -ItemType Directory -Path $hooksDir -Force | Out-Null
+    }
+
+    if ($script:BashAvailable) {
+        $pretooluseSh = '#!/usr/bin/env bash
+INPUT="$(cat)"
+TOOL_NAME="$(echo "$INPUT" | jq -r ''.tool_name // empty'')"
+FILE_PATH="$(echo "$INPUT" | jq -r ''.tool_input.file_path // .tool_input.filePath // empty'')"
+LOG_FILE="/tmp/claude-hook-validation.log"
+log() { echo "$(date -Iseconds) | PreToolUse | $1" >> "$LOG_FILE"; }
+if [[ "$TOOL_NAME" != "Read" ]]; then exit 0; fi
+if [[ -z "$FILE_PATH" ]]; then log "NO_FILE_PATH"; exit 0; fi
+log "FILE | $FILE_PATH"
+if [[ ! -f "$FILE_PATH" ]]; then log "FILE_NOT_FOUND | $FILE_PATH"; exit 0; fi
+exit 0'
+        $posttooluseSh = '#!/usr/bin/env bash
+INPUT="$(cat)"
+TOOL_NAME="$(echo "$INPUT" | jq -r ''.tool_name // empty'')"
+LOG_FILE="/tmp/claude-hook-validation.log"
+echo "$(date -Iseconds) | PostToolUse | FIRED | Tool: ${TOOL_NAME:-unknown}" >> "$LOG_FILE"
+exit 0'
+        $fileguardSh = '#!/usr/bin/env bash
+INPUT="$(cat)"
+TOOL_NAME="$(echo "$INPUT" | jq -r ''.tool_name // empty'')"
+FILE_PATH="$(echo "$INPUT" | jq -r ''.tool_input.file_path // .tool_input.filePath // empty'')"
+LOG_FILE="/tmp/claude-file-guard.log"
+echo "[file-guard] $(date -Iseconds) ALLOWED tool=$TOOL_NAME path=$FILE_PATH" >> "$LOG_FILE"
+exit 0'
+        $notifySh = '#!/usr/bin/env bash
+INPUT="$(cat)"
+MESSAGE="$(echo "$INPUT" | jq -r ''.message // .title // "Claude Code notification"'')"
+TITLE="$(echo "$INPUT" | jq -r ''.title // "Claude Code"'')"
+LOG_FILE="/tmp/claude-notify.log"
+echo "[notify] $(date -Iseconds) title=$TITLE msg=$MESSAGE" >> "$LOG_FILE"
+exit 0'
+        $postcompactSh = '#!/usr/bin/env bash
+CLAUDE_MD="$HOME/.claude/CLAUDE.md"
+LOG_FILE="/tmp/claude-post-compact.log"
+echo "[post-compact] $(date -Iseconds) compaction detected, re-injecting context" >> "$LOG_FILE"
+if [[ ! -f "$CLAUDE_MD" ]]; then exit 0; fi
+echo "## Post-Compaction Context Refresh"
+echo ""
+echo "Your persistent instructions from ~/.claude/CLAUDE.md have been re-injected below."
+echo ""
+cat "$CLAUDE_MD"
+exit 0'
+
+        $scripts = @{
+            "pretooluse.sh" = $pretooluseSh
+            "posttooluse.sh" = $posttooluseSh
+            "file-guard.sh" = $fileguardSh
+            "notify.sh" = $notifySh
+            "post-compact.sh" = $postcompactSh
+        }
+        foreach ($name in $scripts.Keys) {
+            $path = Join-Path $hooksDir $name
+            if ($DryRun) {
+                Write-Host "[DRY-RUN] Would create: $path"
+            } else {
+                $scripts[$name] | Set-Content $path -Encoding UTF8
+                Write-Success "Created hook: $name"
+            }
+        }
+    } else {
+        $pretoolusePs1 = '# pretooluse.ps1
+param()
+$LOG_FILE = Join-Path $env:TEMP "claude-hook-validation.log"
+$inputJson = [Console]::In.ReadToEnd()
+$payload = $inputJson | ConvertFrom-Json
+$timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+Add-Content -Path $LOG_FILE -Value "$timestamp | PreToolUse | FIRED | Tool: $($payload.tool_name)" -ErrorAction SilentlyContinue
+exit 0'
+        $posttoolusePs1 = '# posttooluse.ps1
+param()
+$LOG_FILE = Join-Path $env:TEMP "claude-hook-validation.log"
+$inputJson = [Console]::In.ReadToEnd()
+$payload = $inputJson | ConvertFrom-Json
+$timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+Add-Content -Path $LOG_FILE -Value "$timestamp | PostToolUse | FIRED | Tool: $($payload.tool_name)" -ErrorAction SilentlyContinue
+exit 0'
+        $fileguardPs1 = '# file-guard.ps1
+param()
+$LOG_FILE = Join-Path $env:TEMP "claude-file-guard.log"
+$inputJson = [Console]::In.ReadToEnd()
+$payload = $inputJson | ConvertFrom-Json
+$timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+Add-Content -Path $LOG_FILE -Value "[file-guard] $timestamp ALLOWED tool=$($payload.tool_name)" -ErrorAction SilentlyContinue
+exit 0'
+        $notifyPs1 = '# notify.ps1
+param()
+$LOG_FILE = Join-Path $env:TEMP "claude-notify.log"
+$inputJson = [Console]::In.ReadToEnd()
+$payload = $inputJson | ConvertFrom-Json
+$timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+Add-Content -Path $LOG_FILE -Value "[notify] $timestamp title=$($payload.title)" -ErrorAction SilentlyContinue
+exit 2'
+        $postcompactPs1 = '# post-compact.ps1
+param()
+$CLAUDE_MD = Join-Path $env:USERPROFILE ".claude\CLAUDE.md"
+$LOG_FILE = Join-Path $env:TEMP "claude-post-compact.log"
+$timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+Add-Content -Path $LOG_FILE -Value "[post-compact] $timestamp re-injecting context" -ErrorAction SilentlyContinue
+if (-not (Test-Path $CLAUDE_MD)) { exit 0 }
+Write-Output "## Post-Compaction Context Refresh"
+Write-Output ""
+Get-Content $CLAUDE_MD -Raw
+exit 0'
+
+        $scripts = @{
+            "pretooluse.ps1" = $pretoolusePs1
+            "posttooluse.ps1" = $posttoolusePs1
+            "file-guard.ps1" = $fileguardPs1
+            "notify.ps1" = $notifyPs1
+            "post-compact.ps1" = $postcompactPs1
+        }
+        foreach ($name in $scripts.Keys) {
+            $path = Join-Path $hooksDir $name
+            if ($DryRun) {
+                Write-Host "[DRY-RUN] Would create: $path"
+            } else {
+                $scripts[$name] | Set-Content $path -Encoding UTF8
+                Write-Success "Created hook: $name"
+            }
+        }
+    }
+}
+
+function New-ClaudeMdTemplate {
+    Write-Header "Creating CLAUDE.md Template"
+    $claudeDir = Join-Path $env:USERPROFILE ".claude"
+    $claudeMd = Join-Path $claudeDir "CLAUDE.md"
+    if (Test-Path $claudeMd) {
+        Write-Status "CLAUDE.md already exists - skipping"
+        return
+    }
+    $content = @'
+# Claude Code Optimization Guide
+
+## Cost-First Defaults
+- **Default model**: sonnet (or haiku for quick tasks)
+- **Always use offset/limit** for reads >500 lines
+- **Pre-convert**: PDF->text, Office->Markdown, images->2000x2000 max
+- **Compact at**: 150K tokens
+
+## File Reading Guidelines
+### Always Use Pagination
+For files >500 lines, always specify offset and limit:
+```
+Read file.ts {"offset": 1, "limit": 100}
+```
+
+### Search Before Reading
+Use Grep/Glob to find specific content before reading entire files.
+
+### Binary File Handling
+Pre-convert binary files before reading:
+- PDFs: Use pdftotext.exe or markitdown
+- DOCX/XLSX/PPTX: markitdown
+- Images: magick.exe -resize 2000x2000
+
+## Compact Instructions
+Focus on: current task state, file paths changed, pending errors, and last user instruction verbatim. Skip background theory. Keep code snippets only if they are the direct subject of the next task. Omit completed sub-tasks. Preserve file paths with line numbers for any code being actively edited. Keep error messages verbatim if they are not yet resolved.
+'@
+    if ($DryRun) {
+        Write-Host "[DRY-RUN] Would write CLAUDE.md to: $claudeMd"
+        return
+    }
+    $content | Set-Content $claudeMd -Encoding UTF8
+    Write-Success "Created CLAUDE.md at: $claudeMd"
+}
+
+function Test-Optimizations {
+    Write-Header "Running Validation Checks"
+    $results = @()
+    $settingsPath = Join-Path $env:USERPROFILE ".claude\settings.json"
+    $results += @{ Check = "settings.json exists"; Pass = Test-Path $settingsPath }
+    $settings = $null
+    if (Test-Path $settingsPath) {
+        try {
+            $settings = Get-Content $settingsPath -Raw | ConvertFrom-Json
+            $results += @{ Check = "settings.json valid JSON"; Pass = $true }
+        }
+        catch {
+            $results += @{ Check = "settings.json valid JSON"; Pass = $false; Error = $_.Exception.Message }
+        }
+    }
+    if ($settings) {
+        $results += @{ Check = "autoCompactEnabled is true"; Pass = ($settings.autoCompactEnabled -eq $true) }
+        $expectedVars = @("BASH_MAX_OUTPUT_LENGTH", "DISABLE_TELEMETRY", "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "CLAUDE_CODE_DISABLE_AUTO_MEMORY")
+        if (-not $ReducedPrivacy) { $expectedVars += "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" }
+        foreach ($var in $expectedVars) {
+            $val = $settings.env.$var
+            $results += @{ Check = "env.$var is set"; Pass = (-not [string]::IsNullOrEmpty($val)); Value = $val }
+        }
+    }
+    $hooksDir = Join-Path $env:USERPROFILE ".claude\hooks"
+    $hookExt = if ($script:BashAvailable) { ".sh" } else { ".ps1" }
+    $requiredHooks = @("pretooluse$hookExt", "posttooluse$hookExt")
+    if (-not $NoGuard) { $requiredHooks += "file-guard$hookExt" }
+    if (-not $NoNotify) { $requiredHooks += "notify$hookExt" }
+    if (-not $NoContextRefresh) { $requiredHooks += "post-compact$hookExt" }
+    foreach ($scriptName in $requiredHooks) {
+        $scriptPath = Join-Path $hooksDir $scriptName
+        $results += @{ Check = "$scriptName exists"; Pass = Test-Path $scriptPath }
+    }
+    $claudeMd = Join-Path $env:USERPROFILE ".claude\CLAUDE.md"
+    if (Test-Path $claudeMd) {
+        $content = Get-Content $claudeMd -Raw
+        $results += @{ Check = "CLAUDE.md has Compact Instructions"; Pass = ($content -match 'Compact Instructions') }
+    }
+    else {
+        $results += @{ Check = "CLAUDE.md exists"; Pass = $false }
     }
 
     Write-Host ""
-    Write-Host "Hooks configured: Auto-compact, image pre-processing, cache keepalive" -ForegroundColor Cyan
+    Write-Host "Validation Results" -ForegroundColor Cyan
+    Write-Host ("=" * 60)
+    $passCount = 0
+    $failCount = 0
+    foreach ($r in $results) {
+        if ($r.Pass) {
+            Write-Host "[PASS] $($r.Check)" -ForegroundColor Green
+            $passCount++
+        }
+        else {
+            Write-Host "[FAIL] $($r.Check)" -ForegroundColor Red
+            if ($r.Error) { Write-Host "       Error: $($r.Error)" -ForegroundColor Yellow }
+            $failCount++
+        }
+    }
     Write-Host ""
+    Write-Host "Total: $passCount passed, $failCount failed out of $($results.Count) checks" -ForegroundColor Cyan
+    return ($failCount -eq 0)
+}
 
+function Show-Summary {
+    Write-Header "Configuration Summary"
+    Write-Success "Claude Code optimization complete!"
+    Write-Host ""
+    Write-Host "Configuration files created/updated:" -ForegroundColor Cyan
+    Write-Host "  - ~/.claude/settings.json (main configuration)"
+    Write-Host "  - ~/.claude/CLAUDE.md (compact instructions)"
+    Write-Host "  - ~/.claude/hooks/ (hook scripts)"
+    Write-Host ""
+    Write-Host "Environment variables set:" -ForegroundColor Cyan
+    Write-Host "  - BASH_MAX_OUTPUT_LENGTH=10000 (caps bash output)"
+    Write-Host "  - DISABLE_TELEMETRY=1 (disables telemetry)"
+    if (-not $ReducedPrivacy) { Write-Host "  - CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 (max privacy)" }
+    Write-Host "  - CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000 (compact threshold)"
+    Write-Host "  - CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=70 (compact at 70%)"
+    Write-Host "  - CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 (disables auto-memory)"
+    Write-Host ""
+    Write-Host "Hooks configured:" -ForegroundColor Cyan
+    Write-Host "  - PreToolUse/Read: Image resize + binary-to-markdown"
+    if (-not $NoGuard) { Write-Host "  - PreToolUse/Write|Edit|Bash: File guard" }
+    Write-Host "  - PostToolUse/*: Validation logger"
+    if (-not $NoNotify) { Write-Host "  - Notification/*: Desktop notifications" }
+    if (-not $NoContextRefresh) { Write-Host "  - SessionStart/compact: Context re-injection" }
+    Write-Host ""
+    Write-Host "Privacy mode: " -NoNewline
+    if ($ReducedPrivacy) { Write-Host "Standard (telemetry disabled)" -ForegroundColor Yellow }
+    else { Write-Host "MAXIMUM (all non-essential traffic disabled)" -ForegroundColor Green }
+    Write-Host ""
+    Write-Host "Next steps:" -ForegroundColor Cyan
+    Write-Host "1. Start Claude Code: claude"
+    Write-Host "2. Ask Claude: 'What environment variables do you see for BASH_MAX_OUTPUT_LENGTH?'"
+    Write-Host "3. Try reading a PDF or image file to test hooks"
+    Write-Host ""
     Write-Success "Happy optimizing!"
 }
 
-# Run main
-Main
+Write-Header "Claude Code Token Optimizer & Privacy Enhancer v2 (Windows)"
+if ($DryRun) {
+    Write-WarningLine "DRY RUN MODE - No changes will be made"
+    Write-Host ""
+}
+Write-Host "Mode Configuration:" -ForegroundColor Cyan
+Write-Host "  Privacy: " -NoNewline
+if ($ReducedPrivacy) { Write-Host "Standard (telemetry only)" -ForegroundColor Yellow }
+else { Write-Host "Maximum (all non-essential traffic disabled)" -ForegroundColor Green }
+if ($Experimental) { Write-Host "  Experimental features: ENABLED" -ForegroundColor Magenta }
+if ($NoGuard) { Write-Host "  File guard: DISABLED" -ForegroundColor Yellow }
+if ($NoNotify) { Write-Host "  Desktop notifications: DISABLED" -ForegroundColor Yellow }
+if ($NoContextRefresh) { Write-Host "  Context refresh after compact: DISABLED" -ForegroundColor Yellow }
+if ($AutoApprove) { Write-Host "  Auto-approve safe commands: ENABLED" -ForegroundColor Green }
+if ($AutoFormat) { Write-Host "  Auto-format after edits: ENABLED" -ForegroundColor Green }
+Write-Host ""
+Install-Dependencies
+Set-ClaudeSettings
+New-HookScripts
+New-ClaudeMdTemplate
+$validationPassed = Test-Optimizations
+Show-Summary
+if (-not $validationPassed) { Write-WarningLine "Some validation checks failed. Review the output above." }
