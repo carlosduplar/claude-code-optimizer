@@ -223,15 +223,42 @@ check_formatters() {
 install_markitdown() {
     print_status "Installing markitdown..."
     if $DRY_RUN; then
-        echo "[DRY-RUN] Would run: pip3 install markitdown"
+        echo "[DRY-RUN] Would run: pip3 install --user markitdown"
         return 0
     fi
 
-    if pip3 install markitdown 2>/dev/null || pip install markitdown 2>/dev/null; then
+    local ERR_OUTPUT
+    ERR_OUTPUT=$(mktemp)
+
+    # Try user install first (works with externally-managed environments)
+    if pip3 install --user markitdown 2>"$ERR_OUTPUT" || pip install --user markitdown 2>"$ERR_OUTPUT"; then
+        print_success "markitdown installed successfully (user install)"
+        rm -f "$ERR_OUTPUT"
+        return 0
+    fi
+
+    # Try with --break-system-packages as last resort (Ubuntu 24.04+ PEP 668)
+    if pip3 install --break-system-packages markitdown 2>"$ERR_OUTPUT" || pip install --break-system-packages markitdown 2>"$ERR_OUTPUT"; then
+        print_success "markitdown installed successfully (with --break-system-packages)"
+        rm -f "$ERR_OUTPUT"
+        return 0
+    fi
+
+    # Try system install as fallback
+    if pip3 install markitdown 2>"$ERR_OUTPUT" || pip install markitdown 2>"$ERR_OUTPUT"; then
         print_success "markitdown installed successfully"
+        rm -f "$ERR_OUTPUT"
         return 0
     else
         print_error "Failed to install markitdown"
+        if [[ -s "$ERR_OUTPUT" ]]; then
+            echo -e "${YELLOW}Error output:${NC}"
+            cat "$ERR_OUTPUT" | head -10
+        fi
+        echo -e "${YELLOW}Tip: You can manually install with:${NC}"
+        echo -e "  pip3 install --user markitdown              # or"
+        echo -e "  pip3 install --break-system-packages markitdown"
+        rm -f "$ERR_OUTPUT"
         INSTALL_FAILED+=("markitdown")
         return 1
     fi
@@ -375,15 +402,51 @@ install_prettier() {
 install_black() {
     print_status "Installing black..."
     if $DRY_RUN; then
-        echo "[DRY-RUN] Would run: pip3 install black"
+        echo "[DRY-RUN] Would run: apt install black OR pip3 install --user black"
         return 0
     fi
 
-    if pip3 install black 2>/dev/null || pip install black 2>/dev/null; then
+    # Try system package manager first (for externally-managed environments)
+    if [[ "$OS" == "linux" && "$DISTRO" == "debian" ]]; then
+        if sudo apt-get install -y black 2>/dev/null; then
+            print_success "black installed via apt"
+            return 0
+        fi
+    fi
+
+    local ERR_OUTPUT
+    ERR_OUTPUT=$(mktemp)
+
+    # Try user install (works with externally-managed environments)
+    if pip3 install --user black 2>"$ERR_OUTPUT" || pip install --user black 2>"$ERR_OUTPUT"; then
+        print_success "black installed successfully (user install)"
+        rm -f "$ERR_OUTPUT"
+        return 0
+    fi
+
+    # Try with --break-system-packages as last resort (Ubuntu 24.04+ PEP 668)
+    if pip3 install --break-system-packages black 2>"$ERR_OUTPUT" || pip install --break-system-packages black 2>"$ERR_OUTPUT"; then
+        print_success "black installed successfully (with --break-system-packages)"
+        rm -f "$ERR_OUTPUT"
+        return 0
+    fi
+
+    # Try system install as last resort
+    if pip3 install black 2>"$ERR_OUTPUT" || pip install black 2>"$ERR_OUTPUT"; then
         print_success "black installed successfully"
+        rm -f "$ERR_OUTPUT"
         return 0
     else
         print_error "Failed to install black"
+        if [[ -s "$ERR_OUTPUT" ]]; then
+            echo -e "${YELLOW}Error output:${NC}"
+            cat "$ERR_OUTPUT" | head -10
+        fi
+        echo -e "${YELLOW}Tip: You can manually install with:${NC}"
+        echo -e "  sudo apt install black    # or"
+        echo -e "  pip3 install --user black # or"
+        echo -e "  pip3 install --break-system-packages black"
+        rm -f "$ERR_OUTPUT"
         INSTALL_FAILED+=("black")
         return 1
     fi
@@ -393,15 +456,51 @@ install_black() {
 install_autopep8() {
     print_status "Installing autopep8..."
     if $DRY_RUN; then
-        echo "[DRY-RUN] Would run: pip3 install autopep8"
+        echo "[DRY-RUN] Would run: apt install python3-autopep8 OR pip3 install --user autopep8"
         return 0
     fi
 
-    if pip3 install autopep8 2>/dev/null || pip install autopep8 2>/dev/null; then
+    # Try system package manager first (for externally-managed environments)
+    if [[ "$OS" == "linux" && "$DISTRO" == "debian" ]]; then
+        if sudo apt-get install -y python3-autopep8 2>/dev/null; then
+            print_success "autopep8 installed via apt"
+            return 0
+        fi
+    fi
+
+    local ERR_OUTPUT
+    ERR_OUTPUT=$(mktemp)
+
+    # Try user install (works with externally-managed environments)
+    if pip3 install --user autopep8 2>"$ERR_OUTPUT" || pip install --user autopep8 2>"$ERR_OUTPUT"; then
+        print_success "autopep8 installed successfully (user install)"
+        rm -f "$ERR_OUTPUT"
+        return 0
+    fi
+
+    # Try with --break-system-packages as last resort (Ubuntu 24.04+ PEP 668)
+    if pip3 install --break-system-packages autopep8 2>"$ERR_OUTPUT" || pip install --break-system-packages autopep8 2>"$ERR_OUTPUT"; then
+        print_success "autopep8 installed successfully (with --break-system-packages)"
+        rm -f "$ERR_OUTPUT"
+        return 0
+    fi
+
+    # Try system install as last resort
+    if pip3 install autopep8 2>"$ERR_OUTPUT" || pip install autopep8 2>"$ERR_OUTPUT"; then
         print_success "autopep8 installed successfully"
+        rm -f "$ERR_OUTPUT"
         return 0
     else
         print_error "Failed to install autopep8"
+        if [[ -s "$ERR_OUTPUT" ]]; then
+            echo -e "${YELLOW}Error output:${NC}"
+            cat "$ERR_OUTPUT" | head -10
+        fi
+        echo -e "${YELLOW}Tip: You can manually install with:${NC}"
+        echo -e "  sudo apt install python3-autopep8  # or"
+        echo -e "  pip3 install --user autopep8         # or"
+        echo -e "  pip3 install --break-system-packages autopep8"
+        rm -f "$ERR_OUTPUT"
         INSTALL_FAILED+=("autopep8")
         return 1
     fi
@@ -933,10 +1032,11 @@ extract_redirect_target() {
     local cmd="$1"
     # Match redirection operators followed by optional space and a path
     # Handles: > ~/.env, >>~/.env, 2> file, etc.
-    if [[ "$cmd" =~ [0-9]*[\>]+[[:space:]]*([~/\.][^[:space:]|;\"'&]+) ]]; then
+    local redirect_regex='[0-9]*[>]+[[:space:]]*([~/\.][^[:space:];|"&]+)'
+    if [[ "$cmd" =~ $redirect_regex ]]; then
         local target="${BASH_REMATCH[1]}"
         # Remove trailing punctuation that might be captured
-        target="${target%%[;|&\"'\"\`]*}"
+        target="${target%%[;|&]*}"
         # Expand ~ to HOME
         target="${target/#\~/$HOME}"
         echo "$target"
@@ -965,7 +1065,7 @@ if [[ "$TOOL_NAME" == "Bash" && -n "$COMMAND" ]]; then
                 done
             fi
             # Also block direct mentions in non-read commands
-            if [[ "$COMMAND" =~ (tee|cp|mv|cat.*\>|echo.*\>) ]]; then
+            if echo "$COMMAND" | grep -qE '(tee|cp|mv|cat[[:space:]]+.*|echo[[:space:]]+.*)[[:space:]]*[0-9]*[>]' ; then
                 echo "[file-guard] $(date -Iseconds) BLOCKED bash command matching pattern=$pattern" >> "$LOG_FILE"
                 echo "BLOCKED: Bash command appears to touch a protected path (pattern: $pattern). If intentional, the user must run this command manually." >&2
                 exit 2
