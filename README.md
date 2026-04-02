@@ -32,6 +32,7 @@ This repository documents **obscure, undocumented, and internal** aspects of Cla
 | Document | Description |
 |----------|-------------|
 | [Optimization Scripts](optimization-scripts.md) | Automated setup scripts for token efficiency and privacy configuration |
+| [Validation Suite](validation-suite.md) | Test framework to verify all optimization claims with before/after comparison |
 
 **Tested Environments:**
 - Windows: PowerShell 7.6.0
@@ -53,7 +54,12 @@ claude-code/
 │   ├── undocumented-features.md   # Feature flags & hidden commands
 │   ├── ant-only-commands.md       # Internal commands
 │   ├── telemetry-privacy.md       # Telemetry internals
-│   └── optimization-scripts.md     # Setup automation
+│   ├── optimization-scripts.md    # Setup automation
+│   └── validation-suite.md        # Verification testing framework
+├── validate-optimizations.sh      # Validation script (Linux/macOS/WSL)
+├── validate-optimizations.ps1     # Validation script (Windows)
+├── optimize-claude.sh             # Optimizer script (Linux/macOS/WSL)
+├── optimize-claude.ps1            # Optimizer script (Windows)
 └── src/                           # Source code (not included)
 ```
 

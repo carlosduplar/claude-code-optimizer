@@ -29,16 +29,99 @@ These scripts automate the installation of dependencies and configuration of pri
 ### Linux / macOS / WSL
 
 ```bash
-cd docs
+# 1. Validate current state (optional but recommended)
+./validate-optimizations.sh --before
+
+# 2. Run optimizer
 ./optimize-claude.sh
+
+# 3. Restart shell to apply env vars
+source ~/.bashrc  # or ~/.zshrc
+
+# 4. Verify optimizations are working
+./validate-optimizations.sh --after
 ```
 
 ### Windows (Run as Administrator)
 
 ```powershell
-cd docs
+# 1. Validate current state (optional but recommended)
+.\validate-optimizations.ps1 -Before
+
+# 2. Run optimizer
 .\optimize-claude.ps1
+
+# 3. Restart PowerShell to apply env vars
+# Close and reopen PowerShell window
+
+# 4. Verify optimizations are working
+.\validate-optimizations.ps1 -After
 ```
+
+---
+
+## Validation & Testing
+
+After running the optimization scripts, verify that all optimizations are working correctly using the **Validation Suite**.
+
+### Validation Scripts
+
+| Script | Platform | Purpose |
+|--------|----------|---------|
+| `validate-optimizations.sh` | Linux, macOS, WSL | Tests all optimization claims |
+| `validate-optimizations.ps1` | Windows | Tests all optimization claims |
+
+### What Gets Validated
+
+The validation suite tests every claim made by the optimization scripts:
+
+1. **Dependencies** - markitdown, ImageMagick, poppler installed and functional
+2. **Privacy Variables** - All 5 environment variables set correctly
+3. **Auto-Compact** - Enabled in Claude config
+4. **Hooks** - PreToolUse and PostToolUse hooks configured
+5. **Image Pre-processing** - Can resize images (functional test)
+6. **Document Conversion** - Can extract text from PDFs
+7. **Cache Keepalive** - Hook mechanism in place
+
+### Before/After Comparison
+
+Capture baseline state before optimization, then compare after:
+
+```bash
+# Linux/macOS
+./validate-optimizations.sh --before
+./optimize-claude.sh
+source ~/.bashrc
+./validate-optimizations.sh --after
+
+# Windows
+.\validate-optimizations.ps1 -Before
+.\optimize-claude.ps1
+# Restart PowerShell
+.\validate-optimizations.ps1 -After
+```
+
+**Sample Output:**
+
+```
+📊 DEPENDENCY CHANGES:
+  ✓ markitdown: NOT INSTALLED → INSTALLED
+  ✓ imagemagick: NOT INSTALLED → INSTALLED
+  ✓ poppler: NOT INSTALLED → INSTALLED
+
+🔒 PRIVACY CHANGES:
+  ✓ DISABLE_TELEMETRY: NOT SET → 1
+  ✓ CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: NOT SET → 1
+
+⚙️  AUTO-COMPACT:
+  ✓ Auto-compact: DISABLED → ENABLED
+
+🪝 HOOKS:
+  ✓ PreToolUse hook: NOT CONFIGURED → CONFIGURED
+  ✓ PostToolUse hook: NOT CONFIGURED → CONFIGURED
+```
+
+See [validation-suite.md](validation-suite.md) for complete documentation.
 
 ---
 
@@ -262,13 +345,25 @@ pdftotext -layout document.pdf document.txt
 
 After running these scripts:
 
-| Metric | Improvement |
-|--------|-------------|
-| **Token usage** | 50-80% reduction |
-| **Startup time** | Faster (no telemetry init) |
-| **Session length** | Longer before rate limits |
-| **Privacy** | Maximum (default) |
-| **Cost** | Significantly lower per task |
+| Metric | Improvement | Verification |
+|--------|-------------|--------------|
+| **Token usage** | 50-80% reduction | Run validation suite |
+| **Startup time** | Faster (no telemetry init) | Run validation suite |
+| **Session length** | Longer before rate limits | Run validation suite |
+| **Privacy** | Maximum (default) | Run validation suite |
+| **Cost** | Significantly lower per task | Monitor `/cost` in Claude |
+
+**Verify the optimizations are working:**
+
+```bash
+# Linux/macOS
+./validate-optimizations.sh
+
+# Windows
+.\validate-optimizations.ps1
+```
+
+The validation suite will test all claims and show you exactly what's working and what needs attention.
 
 ---
 
