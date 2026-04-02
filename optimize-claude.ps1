@@ -241,12 +241,16 @@ function Set-ClaudeSettings {
         $fileguardCmd = "bash ~/.claude/hooks/file-guard.sh"
         $notifyCmd = "bash ~/.claude/hooks/notify.sh"
         $postcompactCmd = "bash ~/.claude/hooks/post-compact.sh"
+        $autoapproveCmd = "bash ~/.claude/hooks/auto-approve.sh"
+        $autoformatCmd = "bash ~/.claude/hooks/post-edit-format.sh"
     } else {
         $pretooluseCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\pretooluse.ps1`""
         $posttooluseCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\posttooluse.ps1`""
         $fileguardCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\file-guard.ps1`""
         $notifyCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\notify.ps1`""
         $postcompactCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\post-compact.ps1`""
+        $autoapproveCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\auto-approve.ps1`""
+        $autoformatCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\post-edit-format.ps1`""
     }
 
     $hooks = @{
@@ -279,6 +283,18 @@ function Set-ClaudeSettings {
         $hooks.SessionStart += @{
             matcher = "compact"
             hooks = @(@{ type = "command"; command = $postcompactCmd; timeout = 10 })
+        }
+    }
+    if ($AutoApprove) {
+        $hooks.PreToolUse += @{
+            matcher = "Bash"
+            hooks = @(@{ type = "command"; command = $autoapproveCmd; timeout = 5 })
+        }
+    }
+    if ($AutoFormat) {
+        $hooks.PostToolUse += @{
+            matcher = "Write|Edit|MultiEdit"
+            hooks = @(@{ type = "command"; command = $autoformatCmd; timeout = 30 })
         }
     }
 
@@ -562,6 +578,115 @@ echo "Your persistent instructions from ~/.claude/CLAUDE.md have been re-injecte
 echo ""
 cat "$CLAUDE_MD"
 exit 0'
+        $autoapproveSh = '#!/usr/bin/env bash
+# auto-approve.sh - auto-approves safe read-only bash commands
+# Event: PreToolUse
+# Matcher: Bash
+# Opt-in: only installed with -AutoApprove
+# Exit 0 + JSON stdout = auto-approve | Exit 0 (no JSON) = defer to normal permission prompt
+
+INPUT="$(cat)"
+COMMAND="$(echo "$INPUT" | jq -r ''.tool_input.command // empty'')"
+LOG_FILE="/tmp/claude-auto-approve.log"
+
+# Whitelisted command prefixes (read-only, safe)
+SAFE_PREFIXES=(
+    "ls"
+    "cat "
+    "echo "
+    "pwd"
+    "which "
+    "where "
+    "git status"
+    "git log"
+    "git diff"
+    "git branch"
+    "git show"
+    "git remote"
+    "git stash list"
+    "npm list"
+    "npm run"
+    "pip list"
+    "pip show"
+    "python --version"
+    "python3 --version"
+    "node --version"
+    "node -v"
+    "npm --version"
+    "npm -v"
+    "Get-Content "
+    "Get-ChildItem"
+    "Write-Host"
+    "Select-String"
+    "type "
+    "dir "
+)
+
+for prefix in "${SAFE_PREFIXES[@]}"; do
+    if [[ "$COMMAND" == "$prefix" || "$COMMAND" == "$prefix"* ]]; then
+        echo "[auto-approve] $(date -Iseconds) APPROVED: $COMMAND" >> "$LOG_FILE"
+        printf ''{"hookSpecificOutput":{"permissionDecision":"allow"}}''
+        exit 0
+    fi
+done
+
+echo "[auto-approve] $(date -Iseconds) DEFERRED (not whitelisted): $COMMAND" >> "$LOG_FILE"
+exit 0'
+        $autoformatSh = '#!/usr/bin/env bash
+# post-edit-format.sh - auto-formats files after Write/Edit/MultiEdit
+# Event: PostToolUse
+# Matcher: Write|Edit|MultiEdit
+# Opt-in: only installed with -AutoFormat
+# Exit 0 always (formatting failures are non-fatal)
+
+INPUT="$(cat)"
+FILE_PATH="$(echo "$INPUT" | jq -r ''.tool_input.file_path // .tool_input.filePath // empty'')"
+LOG_FILE="/tmp/claude-auto-format.log"
+
+if [[ -z "$FILE_PATH" || ! -f "$FILE_PATH" ]]; then exit 0; fi
+
+EXT="${FILE_PATH##*.}"
+EXT="$(echo "$EXT" | tr ''[:upper:]'' ''[:lower:]'')"
+
+FORMAT_RESULT=""
+
+case "$EXT" in
+    js|jsx|ts|tsx|json|css|scss|less|html|htm|md|markdown|yaml|yml)
+        if command -v prettier >/dev/null 2>&1; then
+            prettier --write "$FILE_PATH" 2>/dev/null && FORMAT_RESULT="prettier"
+        fi
+        ;;
+    py)
+        if command -v black >/dev/null 2>&1; then
+            black --quiet "$FILE_PATH" 2>/dev/null && FORMAT_RESULT="black"
+        elif command -v autopep8 >/dev/null 2>&1; then
+            autopep8 --in-place "$FILE_PATH" 2>/dev/null && FORMAT_RESULT="autopep8"
+        fi
+        ;;
+    go)
+        if command -v gofmt >/dev/null 2>&1; then
+            gofmt -w "$FILE_PATH" 2>/dev/null && FORMAT_RESULT="gofmt"
+        fi
+        ;;
+    rs)
+        if command -v rustfmt >/dev/null 2>&1; then
+            rustfmt "$FILE_PATH" 2>/dev/null && FORMAT_RESULT="rustfmt"
+        fi
+        ;;
+    rb)
+        if command -v rubocop >/dev/null 2>&1; then
+            rubocop --autocorrect --format quiet "$FILE_PATH" 2>/dev/null && FORMAT_RESULT="rubocop"
+        fi
+        ;;
+esac
+
+if [[ -n "$FORMAT_RESULT" ]]; then
+    echo "[auto-format] $(date -Iseconds) Formatted $FILE_PATH with $FORMAT_RESULT" >> "$LOG_FILE"
+else
+    echo "[auto-format] $(date -Iseconds) No formatter for $FILE_PATH (.$EXT)" >> "$LOG_FILE"
+fi
+
+exit 0'
 
         $scripts = @{
             "pretooluse.sh" = $pretooluseSh
@@ -570,6 +695,8 @@ exit 0'
             "notify.sh" = $notifySh
             "post-compact.sh" = $postcompactSh
         }
+        if ($AutoApprove) { $scripts["auto-approve.sh"] = $autoapproveSh }
+        if ($AutoFormat) { $scripts["post-edit-format.sh"] = $autoformatSh }
         foreach ($name in $scripts.Keys) {
             $path = Join-Path $hooksDir $name
             if ($DryRun) {
@@ -846,6 +973,143 @@ Write-Output "## Post-Compaction Context Refresh"
 Write-Output ""
 Get-Content $CLAUDE_MD -Raw
 exit 0'
+        $autoapprovePs1 = '# auto-approve.ps1 - auto-approves safe read-only bash commands
+# Event: PreToolUse
+# Matcher: Bash
+# Opt-in: only installed with -AutoApprove
+# Exit 0 + JSON stdout = auto-approve | Exit 0 (no JSON) = defer to normal permission prompt
+
+param()
+$ErrorActionPreference = ''Stop''
+
+$LOG_FILE = Join-Path $env:TEMP "claude-auto-approve.log"
+
+# Read JSON from stdin
+$inputJson = [Console]::In.ReadToEnd()
+$payload = $inputJson | ConvertFrom-Json
+
+$command = $payload.tool_input.command
+
+$timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+
+# Whitelisted command prefixes (read-only, safe)
+$SAFE_PREFIXES = @(
+    "ls",
+    "cat ",
+    "echo ",
+    "pwd",
+    "which ",
+    "where ",
+    "git status",
+    "git log",
+    "git diff",
+    "git branch",
+    "git show",
+    "git remote",
+    "git stash list",
+    "npm list",
+    "npm run",
+    "pip list",
+    "pip show",
+    "python --version",
+    "python3 --version",
+    "node --version",
+    "node -v",
+    "npm --version",
+    "npm -v",
+    "Get-Content ",
+    "Get-ChildItem",
+    "Write-Host",
+    "Select-String",
+    "type ",
+    "dir "
+)
+
+foreach ($prefix in $SAFE_PREFIXES) {
+    if ($command -eq $prefix -or $command.StartsWith($prefix)) {
+        Add-Content -Path $LOG_FILE -Value "[auto-approve] $timestamp APPROVED: $command" -ErrorAction SilentlyContinue
+        [Console]::Out.Write(''{"hookSpecificOutput":{"permissionDecision":"allow"}}'')
+        exit 0
+    }
+}
+
+Add-Content -Path $LOG_FILE -Value "[auto-approve] $timestamp DEFERRED (not whitelisted): $command" -ErrorAction SilentlyContinue
+exit 0'
+        $autoformatPs1 = '# post-edit-format.ps1 - auto-formats files after Write/Edit/MultiEdit
+# Event: PostToolUse
+# Matcher: Write|Edit|MultiEdit
+# Opt-in: only installed with -AutoFormat
+# Exit 0 always (formatting failures are non-fatal)
+
+param()
+$ErrorActionPreference = ''SilentlyContinue''
+
+$LOG_FILE = Join-Path $env:TEMP "claude-auto-format.log"
+
+# Read JSON from stdin
+$inputJson = [Console]::In.ReadToEnd()
+$payload = $inputJson | ConvertFrom-Json
+
+$filePath = $payload.tool_input.file_path
+if (-not $filePath) { $filePath = $payload.tool_input.filePath }
+
+if (-not $filePath -or -not (Test-Path $filePath)) { exit 0 }
+
+$extension = [System.IO.Path]::GetExtension($filePath).ToLower().TrimStart(''.'')
+$FORMAT_RESULT = ""
+
+switch ($extension) {
+    { $_ -in @(''js'', ''jsx'', ''ts'', ''tsx'', ''json'', ''css'', ''scss'', ''less'', ''html'', ''htm'', ''md'', ''markdown'', ''yaml'', ''yml'') } {
+        $prettier = Get-Command prettier -ErrorAction SilentlyContinue
+        if ($prettier) {
+            & prettier --write "$filePath" 2>$null
+            if ($LASTEXITCODE -eq 0) { $FORMAT_RESULT = "prettier" }
+        }
+    }
+    ''py'' {
+        $black = Get-Command black -ErrorAction SilentlyContinue
+        if ($black) {
+            & black --quiet "$filePath" 2>$null
+            if ($LASTEXITCODE -eq 0) { $FORMAT_RESULT = "black" }
+        } else {
+            $autopep8 = Get-Command autopep8 -ErrorAction SilentlyContinue
+            if ($autopep8) {
+                & autopep8 --in-place "$filePath" 2>$null
+                if ($LASTEXITCODE -eq 0) { $FORMAT_RESULT = "autopep8" }
+            }
+        }
+    }
+    ''go'' {
+        $gofmt = Get-Command gofmt -ErrorAction SilentlyContinue
+        if ($gofmt) {
+            & gofmt -w "$filePath" 2>$null
+            if ($LASTEXITCODE -eq 0) { $FORMAT_RESULT = "gofmt" }
+        }
+    }
+    ''rs'' {
+        $rustfmt = Get-Command rustfmt -ErrorAction SilentlyContinue
+        if ($rustfmt) {
+            & rustfmt "$filePath" 2>$null
+            if ($LASTEXITCODE -eq 0) { $FORMAT_RESULT = "rustfmt" }
+        }
+    }
+    ''rb'' {
+        $rubocop = Get-Command rubocop -ErrorAction SilentlyContinue
+        if ($rubocop) {
+            & rubocop --autocorrect --format quiet "$filePath" 2>$null
+            if ($LASTEXITCODE -eq 0) { $FORMAT_RESULT = "rubocop" }
+        }
+    }
+}
+
+$timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
+if ($FORMAT_RESULT) {
+    Add-Content -Path $LOG_FILE -Value "[auto-format] $timestamp Formatted $filePath with $FORMAT_RESULT"
+} else {
+    Add-Content -Path $LOG_FILE -Value "[auto-format] $timestamp No formatter for $filePath (.$extension)"
+}
+
+exit 0'
 
         $scripts = @{
             "pretooluse.ps1" = $pretoolusePs1
@@ -854,6 +1118,8 @@ exit 0'
             "notify.ps1" = $notifyPs1
             "post-compact.ps1" = $postcompactPs1
         }
+        if ($AutoApprove) { $scripts["auto-approve.ps1"] = $autoapprovePs1 }
+        if ($AutoFormat) { $scripts["post-edit-format.ps1"] = $autoformatPs1 }
         foreach ($name in $scripts.Keys) {
             $path = Join-Path $hooksDir $name
             if ($DryRun) {
@@ -940,6 +1206,8 @@ function Test-Optimizations {
     if (-not $NoGuard) { $requiredHooks += "file-guard$hookExt" }
     if (-not $NoNotify) { $requiredHooks += "notify$hookExt" }
     if (-not $NoContextRefresh) { $requiredHooks += "post-compact$hookExt" }
+    if ($AutoApprove) { $requiredHooks += "auto-approve$hookExt" }
+    if ($AutoFormat) { $requiredHooks += "post-edit-format$hookExt" }
     foreach ($scriptName in $requiredHooks) {
         $scriptPath = Join-Path $hooksDir $scriptName
         $results += @{ Check = "$scriptName exists"; Pass = Test-Path $scriptPath }
@@ -997,6 +1265,8 @@ function Show-Summary {
     Write-Host "  - PostToolUse/*: Validation logger"
     if (-not $NoNotify) { Write-Host "  - Notification/*: Desktop notifications" }
     if (-not $NoContextRefresh) { Write-Host "  - SessionStart/compact: Context re-injection" }
+    if ($AutoApprove) { Write-Host "  - PreToolUse/Bash: Auto-approve safe commands" }
+    if ($AutoFormat) { Write-Host "  - PostToolUse/Write|Edit: Auto-format after edits" }
     Write-Host ""
     Write-Host "Privacy mode: " -NoNewline
     if ($ReducedPrivacy) { Write-Host "Standard (telemetry disabled)" -ForegroundColor Yellow }

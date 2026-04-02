@@ -97,6 +97,66 @@ Trigger a notification (this happens automatically when Claude sends a notificat
 
 ---
 
+### Test 8: Test Auto-Approve Hook (if -AutoApprove enabled)
+
+Ask Claude to run a safe command:
+```
+Run: git status
+```
+
+Or:
+```
+Run: ls -la
+```
+
+**Expected**: 
+- The command should be auto-approved without user confirmation
+- Log should show "APPROVED" in `/tmp/claude-auto-approve.log`
+- JSON response with `{"hookSpecificOutput":{"permissionDecision":"allow"}}`
+
+**Test non-whitelisted command**:
+```
+Run: rm -rf ./dist
+```
+
+**Expected**: Normal permission prompt should appear (not auto-approved)
+
+---
+
+### Test 9: Test Auto-Format Hook (if -AutoFormat enabled)
+
+Create a poorly formatted file and ask Claude to edit it:
+
+```javascript
+// test-format.js (create this file with bad formatting)
+function  test(  ) {
+  const x=1;
+    return    x;
+}
+```
+
+Then ask Claude:
+```
+Edit ~/test-format.js to add a comment
+```
+
+**Expected**:
+- After the edit, the file should be automatically formatted
+- Log should show formatted with "prettier" (for JS files) in `/tmp/claude-auto-format.log`
+- File should have consistent indentation
+
+**Test with Python**:
+```python
+# test-format.py (create with bad formatting)
+def  test(  ):
+    x=1
+    return    x
+```
+
+Ask Claude to edit it, then check if `black` or `autopep8` formatted it.
+
+---
+
 ## Settings.json Verification
 
 Check the generated settings:
@@ -111,6 +171,8 @@ cat ~/.claude/settings.json | jq .
 - All 8 env vars are set
 - Hooks are registered for PreToolUse, PostToolUse, Notification, SessionStart
 - Hook commands use `bash ~/.claude/hooks/...` format (not PowerShell)
+- **If -AutoApprove**: PreToolUse/Bash hook exists
+- **If -AutoFormat**: PostToolUse/Write|Edit|MultiEdit hook exists
 
 ---
 
@@ -122,12 +184,14 @@ List hook files:
 ls -la ~/.claude/hooks/
 ```
 
-**Expected files**:
+**Expected files** (all 7):
 - `pretooluse.sh` (image resize + binary conversion)
 - `posttooluse.sh` (validation logger)
 - `file-guard.sh` (sensitive file protection)
 - `notify.sh` (desktop notifications)
 - `post-compact.sh` (context re-injection)
+- `auto-approve.sh` (auto-approve safe commands - if enabled)
+- `post-edit-format.sh` (auto-format after edits - if enabled)
 
 ---
 
@@ -146,16 +210,39 @@ cat ~/.claude/CLAUDE.md
 
 ---
 
-## Manual Hook Test (Bash)
+## Manual Hook Tests (Bash)
 
-Test the pretooluse hook manually:
-
+### Test pretooluse hook:
 ```bash
 echo '{"tool_name":"Read","tool_input":{"file_path":"/tmp/test.txt"}}' | bash ~/.claude/hooks/pretooluse.sh
 echo "Exit code: $?"
 ```
 
 **Expected**: Exit code 0, log entry created
+
+### Test file-guard hook:
+```bash
+echo '{"tool_name":"Write","tool_input":{"file_path":"/home/user/.env"}}' | bash ~/.claude/hooks/file-guard.sh 2>&1
+echo "Exit code: $?"
+```
+
+**Expected**: "BLOCKED" message and exit code 2
+
+### Test auto-approve hook (if enabled):
+```bash
+echo '{"tool_name":"Bash","tool_input":{"command":"git status"}}' | bash ~/.claude/hooks/auto-approve.sh
+echo "Exit code: $?"
+```
+
+**Expected**: Exit code 0, stdout contains `{"hookSpecificOutput":{"permissionDecision":"allow"}}`
+
+### Test auto-approve with non-whitelisted command:
+```bash
+echo '{"tool_name":"Bash","tool_input":{"command":"rm -rf /"}}' | bash ~/.claude/hooks/auto-approve.sh
+echo "Exit code: $?"
+```
+
+**Expected**: Exit code 0, empty stdout (no permissionDecision JSON)
 
 ---
 
@@ -197,6 +284,31 @@ echo "Exit code: $?"
 
 **Expected**: "BLOCKED" message and exit code 2
 
+### Issue: Auto-approve not working
+
+Check if the hook is registered:
+```bash
+cat ~/.claude/settings.json | jq '.hooks.PreToolUse[] | select(.matcher == "Bash")'
+```
+
+Test the hook manually:
+```bash
+echo '{"tool_name":"Bash","tool_input":{"command":"git status"}}' | bash ~/.claude/hooks/auto-approve.sh
+cat /tmp/claude-auto-approve.log
+```
+
+### Issue: Auto-format not working
+
+Check if the hook is registered:
+```bash
+cat ~/.claude/settings.json | jq '.hooks.PostToolUse[] | select(.matcher == "Write|Edit|MultiEdit")'
+```
+
+Check the log:
+```bash
+cat /tmp/claude-auto-format.log
+```
+
 ---
 
 ## Full Test Suite (Automated)
@@ -214,7 +326,7 @@ Or manually verify all items from the checklist above.
 
 ## Success Criteria
 
-✅ All 15 validation checks pass  
+✅ All 17 validation checks pass (15 base + 2 optional)  
 ✅ Environment variables visible to Claude  
 ✅ Hooks fire on Read/Write/Edit operations  
 ✅ File guard blocks sensitive paths  
@@ -222,6 +334,8 @@ Or manually verify all items from the checklist above.
 ✅ PDFs/docs are converted to text  
 ✅ Notifications appear on Windows  
 ✅ Context re-injection works after compaction  
+✅ **Auto-approve**: Safe commands auto-approved, unsafe commands prompt  
+✅ **Auto-format**: Files formatted after edits (prettier/black/etc.)  
 
 ---
 
@@ -240,3 +354,25 @@ claude
 ```
 
 Then run the tests above within that session.
+
+---
+
+## Optional Flags Reference
+
+When running `optimize-claude.ps1`, you can enable optional features:
+
+```powershell
+# Enable auto-approve (auto-approves safe bash commands)
+.\optimize-claude.ps1 -AutoApprove
+
+# Enable auto-format (auto-formats files after edits)
+.\optimize-claude.ps1 -AutoFormat
+
+# Enable both
+.\optimize-claude.ps1 -AutoApprove -AutoFormat
+
+# Enable with other flags
+.\optimize-claude.ps1 -AutoApprove -AutoFormat -Experimental -Force
+```
+
+**Note**: These are opt-in features that require explicit flags to enable.
