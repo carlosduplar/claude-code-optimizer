@@ -1,0 +1,7 @@
+The file contains:
+
+```
+This is a test document for Claude Code hook validation.
+```
+
+It's a simple 2-line test file used for validating Claude Code hooks in the optimizer project.

@@ -1,0 +1,7 @@
+I've read the image file. It's a **3000x3000 pixel PNG test image** (displayed at 2000x2000). Based on the filename and location (`.validation-test\test-image.png`), this appears to be a test file used for validating image optimization or preprocessing scripts in your claude-code-optimizer project.
+
+The image appears to be a test pattern - the kind typically used for testing image processing, resizing, or format conversion functionality. Given your project's focus on optimizing Claude Code workflows, this is likely used to test the ImageMagick pre-processing commands mentioned in your CLAUDE.md:
+
+```powershell
+magick.exe input.png -resize 2000x2000 -quality 85 output.png
+```

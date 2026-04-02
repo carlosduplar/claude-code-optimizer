@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "if": "*",
+            "type": "command",
+            "command": "Write-Output \"{\\\"cache_keepalive\\\": \\\"$(Get-Date -Format yyyyMMddHHmmss)\\\"}\""
+          }
+        ],
+        "matcher": "*"
+      }
+    ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "if": "Read(*.{png,jpg,jpeg})",
+            "type": "command",
+            "command": "if (Get-Command magick -ErrorAction SilentlyContinue) { magick \"$env:ARGUMENTS\" -resize 2000x2000 -quality 85 \"C:\\temp\\resized_$(Split-Path \"$env:ARGUMENTS\" -Leaf)\" }"
+          }
+        ],
+        "matcher": "Read"
+      }
+    ]
+  },
+  "autoCompactEnabled": true
+}

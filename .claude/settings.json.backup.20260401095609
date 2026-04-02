@@ -1,0 +1,21 @@
+{
+  "autoCompactEnabled": true,
+  "hooks": {
+    "PreToolUse": [{
+      "matcher": "Read",
+      "hooks": [{
+        "type": "command",
+        "command": "if command -v magick >/dev/null 2>&1 && [ -f \"$ARGUMENTS\" ] && [[ \"$ARGUMENTS\" =~ \\.(png|jpg|jpeg)$ ]]; then magick \"$ARGUMENTS\" -resize 2000x2000\\> -quality 85 /tmp/resized_$(basename \"$ARGUMENTS\"); fi",
+        "if": "Read(*.{png,jpg,jpeg})"
+      }]
+    }],
+    "PostToolUse": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "echo '{\"cache_keepalive\": \"'$(date +%s)'\"}'",
+        "if": "*"
+      }]
+    }]
+  }
+}

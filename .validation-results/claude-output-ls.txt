@@ -1,0 +1,24 @@
+Here are the files in your current directory. This is the **claude-code-optimizer** repository with:
+
+**Documentation (md files):**
+- `README.md` - Main project documentation
+- `optimization-scripts.md`, `validation-suite.md`, `prompt-caching.md`
+- `hook-monitor.md`, `headless-validation.md`
+- Various system docs: `permission-system.md`, `query-flow.md`, `session-memory.md`, `skill-plugin-system.md`, `tool-system.md`, `undocumented-features.md`, `telemetry-privacy.md`, `ant-only-commands.md`
+
+**Scripts:**
+- `optimize-claude.ps1` / `optimize-claude.sh` - Main optimization setup scripts
+- `validate-optimizations.ps1` / `validate-optimizations.sh` - Validation tools
+- `monitor-hooks.ps1` / `monitor-hooks.sh` - Hook monitoring
+- `claude-keepalive.ps1` / `claude-keepalive.sh` - Cache keepalive
+- `test-optimizations.ps1` / `test-optimizations.sh` - Test suite
+- `validate-hooks-headless.ps1` / `validate-hooks-headless.sh` - Headless validation
+- `preprocess-for-claude.ps1` / `preprocess-for-claude.bat` - File preprocessing
+- `validate-simple.ps1` - Simple validation
+
+**Directories:**
+- `.claude/` - Claude Code configuration
+- `.git/` - Git repository
+- `.hook-test-files/`, `.validation-results/`, `.validation-test/` - Test data
+
+**Note:** `CLAUDE.md` is empty (per the git status showing it was removed - hooks now handle all optimizations transparently).
