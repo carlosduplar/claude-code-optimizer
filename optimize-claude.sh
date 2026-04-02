@@ -27,10 +27,31 @@ REDUCED_PRIVACY=false
 DRY_RUN=false
 SKIP_DEPS=false
 VERIFY_ONLY=false
+AUTO_APPROVE=false
+AUTO_FORMAT=false
 
 # Dependency tracking
 MISSING_DEPS=()
 INSTALL_FAILED=()
+
+# Detect if script is being sourced (not executed)
+script_is_sourced() {
+    # If BASH_SOURCE has more than 1 element, or if ${0} differs from the script name
+    [[ "${BASH_SOURCE[0]}" != "$0" ]]
+}
+
+# Export environment variables directly to current shell
+export_env_vars() {
+    export BASH_MAX_OUTPUT_LENGTH=10000
+    export DISABLE_TELEMETRY=1
+    export CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000
+    export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=70
+    export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+    if $FULL_PRIVACY; then
+        export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+    fi
+    print_success "Environment variables exported to current shell"
+}
 
 # Function to print colored output
 print_status() {
@@ -64,6 +85,8 @@ Usage: $0 [OPTIONS]
 
 OPTIONS:
     --reduced-privacy Use reduced privacy (telemetry disabled only, keeps auto-updates)
+    --auto-approve    Enable auto-approval for safe read-only commands (opt-in)
+    --auto-format     Enable auto-formatting after file edits (opt-in)
     --dry-run         Show what would be done without making changes
     --skip-deps       Skip dependency installation
     --verify          Verify current environment variable configuration
@@ -72,6 +95,8 @@ OPTIONS:
 EXAMPLES:
     $0                    # Full privacy mode (default)
     $0 --reduced-privacy  # Reduced privacy (standard telemetry disabled)
+    $0 --auto-approve     # Enable auto-approval for safe commands
+    $0 --auto-format      # Enable auto-formatting after edits
     $0 --dry-run          # Preview changes
     $0 --verify           # Check current env var configuration
 
@@ -91,6 +116,14 @@ parse_args() {
             --reduced-privacy)
                 FULL_PRIVACY=false
                 REDUCED_PRIVACY=true
+                shift
+                ;;
+            --auto-approve)
+                AUTO_APPROVE=true
+                shift
+                ;;
+            --auto-format)
+                AUTO_FORMAT=true
                 shift
                 ;;
             --dry-run)
@@ -608,20 +641,26 @@ configure_privacy() {
 # Claude Code Maximum Privacy Settings
 export DISABLE_TELEMETRY=1
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
+export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
 export OTEL_LOG_USER_PROMPTS=0
 export OTEL_LOG_TOOL_DETAILS=0
 
 # Claude Code Token Optimization
+export BASH_MAX_OUTPUT_LENGTH=10000
 export CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000
+export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=70
 $BLOCK_END"
         print_status "Configuring MAXIMUM privacy mode"
     else
         ENV_BLOCK="$BLOCK_START
 # Claude Code Privacy Settings
 export DISABLE_TELEMETRY=1
+export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
 
 # Claude Code Token Optimization
+export BASH_MAX_OUTPUT_LENGTH=10000
 export CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000
+export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=70
 $BLOCK_END"
         print_status "Configuring standard privacy mode"
     fi
@@ -747,8 +786,12 @@ create_keepalive_script() {
     local KEEPALIVE_SCRIPT="claude-keepalive.sh"
 
     if [[ -f "$KEEPALIVE_SCRIPT" ]]; then
+        if $DRY_RUN; then
+            echo "[DRY-RUN] $KEEPALIVE_SCRIPT already exists, would prompt to overwrite"
+            return 0
+        fi
         print_warning "$KEEPALIVE_SCRIPT already exists"
-        read -p "Overwrite? (y/N) " -n 1 -r
+        read -r -p "Overwrite? (y/N) " -n 1
         echo ""
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             return 0
@@ -1090,14 +1133,151 @@ exit 0
 HOOKEOF
     chmod +x "$HOOKS_DIR/posttooluse.sh"
 
-    if [[ -f "$SETTINGS_FILE" ]]; then
-        print_warning "$SETTINGS_FILE already exists"
-        read -p "Create backup and overwrite? (y/N) " -n 1 -r
-        echo ""
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            return 0
+    # Create auto-approve.sh hook script (if --auto-approve enabled)
+    if $AUTO_APPROVE; then
+        cat > "$HOOKS_DIR/auto-approve.sh" << 'HOOKEOF'
+#!/usr/bin/env bash
+# auto-approve.sh - auto-approves safe read-only bash commands
+# Event: PreToolUse
+# Matcher: Bash
+# Opt-in: only installed with --auto-approve
+# Exit 0 + JSON stdout = auto-approve | Exit 0 (no JSON) = defer to normal permission prompt
+
+INPUT="$(cat)"
+COMMAND="$(echo "$INPUT" | jq -r '.tool_input.command // empty')"
+LOG_FILE="/tmp/claude-auto-approve.log"
+
+# Whitelisted command prefixes (read-only, safe)
+SAFE_PREFIXES=(
+    "ls"
+    "cat "
+    "echo "
+    "pwd"
+    "which "
+    "where "
+    "git status"
+    "git log"
+    "git diff"
+    "git branch"
+    "git show"
+    "git remote"
+    "git stash list"
+    "npm list"
+    "npm run"
+    "pip list"
+    "pip show"
+    "python --version"
+    "python3 --version"
+    "node --version"
+    "node -v"
+    "npm --version"
+    "npm -v"
+    "Get-Content "
+    "Get-ChildItem"
+    "Write-Host"
+    "Select-String"
+    "type "
+    "dir "
+)
+
+for prefix in "${SAFE_PREFIXES[@]}"; do
+    if [[ "$COMMAND" == "$prefix" || "$COMMAND" == "$prefix"* ]]; then
+        echo "[auto-approve] $(date -Iseconds) APPROVED: $COMMAND" >> "$LOG_FILE"
+        printf '{"hookSpecificOutput":{"permissionDecision":"allow"}}'
+        exit 0
+    fi
+done
+
+echo "[auto-approve] $(date -Iseconds) DEFERRED (not whitelisted): $COMMAND" >> "$LOG_FILE"
+exit 0
+HOOKEOF
+        chmod +x "$HOOKS_DIR/auto-approve.sh"
+        print_success "Created auto-approve.sh hook"
+    fi
+
+    # Create post-edit-format.sh hook script (if --auto-format enabled)
+    if $AUTO_FORMAT; then
+        cat > "$HOOKS_DIR/post-edit-format.sh" << 'HOOKEOF'
+#!/usr/bin/env bash
+# post-edit-format.sh - auto-formats files after Write/Edit/MultiEdit
+# Event: PostToolUse
+# Matcher: Write|Edit|MultiEdit
+# Opt-in: only installed with --auto-format
+# Exit 0 always (formatting failures are non-fatal)
+
+INPUT="$(cat)"
+FILE_PATH="$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.filePath // empty')"
+LOG_FILE="/tmp/claude-auto-format.log"
+
+if [[ -z "$FILE_PATH" || ! -f "$FILE_PATH" ]]; then exit 0; fi
+
+EXT="${FILE_PATH##*.}"
+EXT="$(echo "$EXT" | tr '[:upper:]' '[:lower:]')"
+
+FORMAT_RESULT=""
+
+case "$EXT" in
+    js|jsx|ts|tsx|json|css|scss|less|html|htm|md|markdown|yaml|yml)
+        if command -v prettier >/dev/null 2>&1; then
+            prettier --write "$FILE_PATH" 2>/dev/null && FORMAT_RESULT="prettier"
         fi
-        cp "$SETTINGS_FILE" "$SETTINGS_FILE.backup.$(date +%Y%m%d%H%M%S)"
+        ;;
+    py)
+        if command -v black >/dev/null 2>&1; then
+            black --quiet "$FILE_PATH" 2>/dev/null && FORMAT_RESULT="black"
+        elif command -v autopep8 >/dev/null 2>&1; then
+            autopep8 --in-place "$FILE_PATH" 2>/dev/null && FORMAT_RESULT="autopep8"
+        fi
+        ;;
+    go)
+        if command -v gofmt >/dev/null 2>&1; then
+            gofmt -w "$FILE_PATH" 2>/dev/null && FORMAT_RESULT="gofmt"
+        fi
+        ;;
+    rs)
+        if command -v rustfmt >/dev/null 2>&1; then
+            rustfmt "$FILE_PATH" 2>/dev/null && FORMAT_RESULT="rustfmt"
+        fi
+        ;;
+    rb)
+        if command -v rubocop >/dev/null 2>&1; then
+            rubocop --autocorrect --format quiet "$FILE_PATH" 2>/dev/null && FORMAT_RESULT="rubocop"
+        fi
+        ;;
+esac
+
+if [[ -n "$FORMAT_RESULT" ]]; then
+    echo "[auto-format] $(date -Iseconds) Formatted $FILE_PATH with $FORMAT_RESULT" >> "$LOG_FILE"
+else
+    echo "[auto-format] $(date -Iseconds) No formatter for $FILE_PATH (.$EXT)" >> "$LOG_FILE"
+fi
+
+exit 0
+HOOKEOF
+        chmod +x "$HOOKS_DIR/post-edit-format.sh"
+        print_success "Created post-edit-format.sh hook"
+        AUTO_FORMAT_JSON='    ,{
+      "matcher": "Write|Edit|MultiEdit",
+      "hooks": [{
+        "type": "command",
+        "command": "bash '"$HOOKS_DIR"'/post-edit-format.sh",
+        "timeout": 30
+      }]
+    }'
+    fi
+
+    if [[ -f "$SETTINGS_FILE" ]]; then
+        if $DRY_RUN; then
+            echo "[DRY-RUN] $SETTINGS_FILE already exists, would backup and overwrite"
+        else
+            print_warning "$SETTINGS_FILE already exists"
+            read -r -p "Create backup and overwrite? (y/N) " -n 1
+            echo ""
+            if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                return 0
+            fi
+            cp "$SETTINGS_FILE" "$SETTINGS_FILE.backup.$(date +%Y%m%d%H%M%S)"
+        fi
     fi
 
     if $DRY_RUN; then
@@ -1106,6 +1286,20 @@ HOOKEOF
     fi
 
     # Create settings.json with hook references
+    local AUTO_APPROVE_HOOK=""
+    local AUTO_FORMAT_HOOK=""
+
+    if $AUTO_APPROVE; then
+        AUTO_APPROVE_HOOK='      {
+        "matcher": "Bash",
+        "hooks": [{
+          "type": "command",
+          "command": "bash '"$HOOKS_DIR"'/auto-approve.sh",
+          "timeout": 5
+        }]
+      },'
+    fi
+
     cat > "$SETTINGS_FILE" << EOF
 {
   "\$schema": "https://json.schemastore.org/claude-code-settings.json",
@@ -1120,6 +1314,7 @@ HOOKEOF
           "timeout": 30
         }]
       },
+${AUTO_APPROVE_HOOK}
       {
         "matcher": "Write|Edit|MultiEdit|Bash",
         "hooks": [{
@@ -1136,13 +1331,16 @@ HOOKEOF
         "command": "bash $HOOKS_DIR/posttooluse.sh",
         "timeout": 5
       }]
-    }]
+    }${AUTO_FORMAT_JSON}]
   }
 }
 EOF
 
-    print_success "Created $SETTINGS_FILE with hooks"
-    print_status "Hooks configured: PreToolUse (Read, Write/Bash with file-guard), PostToolUse"
+    local HOOK_STATUS="Hooks configured: PreToolUse (Read, file-guard"
+    if $AUTO_APPROVE; then HOOK_STATUS+=", auto-approve"; fi
+    HOOK_STATUS+=", Write/Bash), PostToolUse"
+    if $AUTO_FORMAT; then HOOK_STATUS+=", auto-format"; fi
+    print_status "$HOOK_STATUS"
 }
 
 # Verify environment variables
@@ -1193,9 +1391,12 @@ verify_env_vars() {
 
     echo ""
     print_status "Current shell environment (may differ until you source the config):"
+    echo "  BASH_MAX_OUTPUT_LENGTH=${BASH_MAX_OUTPUT_LENGTH:-<not set>}"
     echo "  DISABLE_TELEMETRY=${DISABLE_TELEMETRY:-<not set>}"
-    echo "  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-<not set>}"
     echo "  CLAUDE_CODE_AUTO_COMPACT_WINDOW=${CLAUDE_CODE_AUTO_COMPACT_WINDOW:-<not set>}"
+    echo "  CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=${CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:-<not set>}"
+    echo "  CLAUDE_CODE_DISABLE_AUTO_MEMORY=${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-<not set>}"
+    echo "  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-<not set>}"
 
     echo ""
     print_status "To apply environment variables to your current shell, run:"
@@ -1244,9 +1445,19 @@ main() {
         SHELL_CONFIG="$HOME/.zshrc"
     fi
 
+    echo ""
     echo -e "${BOLD}Next steps:${NC}"
-    echo "1. Run: source $SHELL_CONFIG  (to apply env vars to current shell)"
-    echo "2. Restart Claude Code"
+    if script_is_sourced; then
+        # Script was sourced, vars already exported
+        export_env_vars
+        echo "1. Environment variables are already active in this shell"
+        echo "2. Start or restart Claude Code"
+    else
+        # Script was executed normally
+        echo "1. Run: source $SHELL_CONFIG  (to apply env vars to current shell)"
+        echo "   Or start a new terminal session"
+        echo "2. Restart Claude Code"
+    fi
     echo "3. Check /cost regularly to monitor usage"
     echo ""
 
@@ -1256,8 +1467,10 @@ main() {
         echo -e "${BOLD}Privacy mode:${NC} Standard (telemetry disabled)"
     fi
 
-    echo ""
-    echo -e "${BOLD}Hooks configured:${NC} Auto-compact, image pre-processing, cache keepalive"
+    local SUMMARY_HOOKS="Auto-compact, image pre-processing, cache keepalive"
+    if $AUTO_APPROVE; then SUMMARY_HOOKS+=", auto-approve"; fi
+    if $AUTO_FORMAT; then SUMMARY_HOOKS+=", auto-format"; fi
+    echo -e "${BOLD}Hooks configured:${NC} $SUMMARY_HOOKS"
     echo ""
 
     # Show verification
