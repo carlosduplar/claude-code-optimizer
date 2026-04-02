@@ -1,8 +1,7 @@
 #!/bin/bash
 #
 # Claude Code Optimizer - Configuration Validation Suite
-# Validates setup without requiring headless Claude execution
-# NOTE: Hooks must be tested manually in an interactive Claude session
+# Validates setup with optional headless hook testing
 
 # Colors
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
@@ -12,6 +11,8 @@ BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'; BOLD='\033[1m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 VERBOSE=false
+TEST_HOOKS=false
+CLAUDE_CMD=""
 
 # Test counters
 TESTS_PASSED=0; TESTS_FAILED=0; TESTS_SKIPPED=0
@@ -47,6 +48,7 @@ parse_args() {
     while [[ $# -gt 0 ]]; do
         case $1 in
             --verbose) VERBOSE=true; shift ;;
+            --test-hooks) TEST_HOOKS=true; shift ;;
             --help|-h) show_help; exit 0 ;;
             *) echo "Unknown option: $1"; exit 1 ;;
         esac
@@ -59,40 +61,46 @@ Claude Code Optimizer - Configuration Validation
 Usage: ./validate.sh [OPTIONS]
 
 Validates that all optimizations are correctly configured.
-NOTE: Hook execution must be tested manually (see output for instructions).
+Optionally tests hooks in headless mode using --test-hooks.
 
 Options:
-  --verbose    Show detailed output
-  --help       Show this help message
+  --verbose      Show detailed output
+  --test-hooks   Run headless hook tests (requires jq, API credits)
+  --help         Show this help message
 
 Tests:
   1. Dependencies (ImageMagick, pdftotext, markitdown)
   2. Privacy environment variables
   3. Auto-compact configuration
   4. Hook configuration (PreToolUse, PostToolUse)
-  5. Claude Code installation
+  5. Headless hook execution (optional with --test-hooks)
+  6. Claude Code installation
 EOF
+}
+
+# Find Claude binary
+find_claude() {
+    if command -v claude >/dev/null 2>&1; then
+        CLAUDE_CMD="claude"
+    elif [[ -x "$HOME/.local/bin/claude" ]]; then
+        CLAUDE_CMD="$HOME/.local/bin/claude"
+    elif [[ -x "/usr/local/bin/claude" ]]; then
+        CLAUDE_CMD="/usr/local/bin/claude"
+    fi
 }
 
 # Test 1: Check prerequisites
 # Check Claude Code is installed
 check_claude() {
-    local claude_cmd=""
-    if command -v claude >/dev/null 2>&1; then
-        claude_cmd="claude"
-    elif [[ -x "$HOME/.local/bin/claude" ]]; then
-        claude_cmd="$HOME/.local/bin/claude"
-    elif [[ -x "/usr/local/bin/claude" ]]; then
-        claude_cmd="/usr/local/bin/claude"
-    fi
+    find_claude
 
-    if [[ -z "$claude_cmd" ]]; then
+    if [[ -z "$CLAUDE_CMD" ]]; then
         print_error "Claude Code not found in PATH"
         print_status "Install from: https://claude.ai/code"
         return 1
     fi
 
-    local version=$($claude_cmd --version 2>&1 | head -1 || echo "unknown")
+    local version=$($CLAUDE_CMD --version 2>&1 | head -1 || echo "unknown")
     print_success "Claude Code found: $version"
     return 0
 }
@@ -128,6 +136,20 @@ check_dependencies() {
     else
         print_warning "markitdown not found (optional, for Office document conversion)"
         print_status "Install: pip install markitdown"
+    fi
+
+    # jq (for headless hook testing)
+    if command -v jq >/dev/null 2>&1; then
+        print_success "jq installed (required for --test-hooks)"
+    else
+        if $TEST_HOOKS; then
+            print_error "jq not found (required for --test-hooks)"
+            print_status "Install: sudo apt-get install jq  # Debian/Ubuntu"
+            print_status "        brew install jq           # macOS"
+            TEST_HOOKS=false
+        else
+            print_warning "jq not found (install for --test-hooks capability)"
+        fi
     fi
 }
 
@@ -247,11 +269,114 @@ check_hooks() {
     fi
 }
 
+# Test 6: Headless hook execution
+test_hooks_headless() {
+    print_section "🧪 HEADLESS HOOK TESTING"
+
+    if ! $TEST_HOOKS; then
+        print_warning "Skipped (use --test-hooks to enable)"
+        return 0
+    fi
+
+    if [[ -z "$CLAUDE_CMD" ]]; then
+        print_error "Claude not found, cannot run headless tests"
+        return 1
+    fi
+
+    print_status "Running headless hook test (costs ~$0.01-0.02 in API credits)..."
+    print_status "Command: claude -p --output-format stream-json --include-hook-events --allowedTools 'Read'"
+
+    local test_image="$REPO_DIR/tests/test-image.png"
+    if [[ ! -f "$test_image" ]]; then
+        print_warning "Test image not found at $test_image"
+        print_status "Creating a simple test image..."
+        test_image="/tmp/validate-test.png"
+        if command -v magick >/dev/null 2>&1; then
+            magick -size 100x100 xc:blue "$test_image" 2>/dev/null || {
+                print_warning "Could not create test image, skipping headless test"
+                return 0
+            }
+        elif command -v convert >/dev/null 2>&1; then
+            convert -size 100x100 xc:blue "$test_image" 2>/dev/null || {
+                print_warning "Could not create test image, skipping headless test"
+                return 0
+            }
+        else
+            print_warning "No image creation tool available, skipping headless test"
+            return 0
+        fi
+    fi
+
+    # Run headless test
+    local output_file="/tmp/claude-hook-test-$$.jsonl"
+    local hook_events_file="/tmp/claude-hooks-$$.txt"
+
+    print_status "Executing: Read $test_image"
+
+    # Run Claude in headless mode with hook events
+    # Note: --include-hook-events requires --verbose flag
+    echo "Read $test_image" | "$CLAUDE_CMD" -p \
+        --output-format stream-json \
+        --verbose \
+        --include-hook-events \
+        --allowedTools "Read" \
+        > "$output_file" 2>&1
+
+    local exit_code=$?
+
+    # Extract hook events
+    if [[ -f "$output_file" ]]; then
+        # Hook events have type="system" with subtype="hook_started" or "hook_response"
+        jq -r 'select(.type == "system" and (.subtype | startswith("hook_"))) | "\(.hook_name):\(.hook_event)"' "$output_file" 2>/dev/null > "$hook_events_file"
+
+        local pre_count=$(grep -c "PreToolUse" "$hook_events_file" 2>/dev/null || echo "0")
+        local post_count=$(grep -c "PostToolUse" "$hook_events_file" 2>/dev/null || echo "0")
+
+        if [[ "$pre_count" -gt 0 ]]; then
+            print_success "PreToolUse hook fired ($pre_count times)"
+        else
+            print_error "PreToolUse hook did not fire"
+            if [[ "$VERBOSE" == "true" ]]; then
+                print_status "Hook events found:"
+                cat "$hook_events_file" 2>/dev/null || echo "(none)"
+            fi
+        fi
+
+        if [[ "$post_count" -gt 0 ]]; then
+            print_success "PostToolUse hook fired ($post_count times)"
+        else
+            print_error "PostToolUse hook did not fire"
+        fi
+
+        # Check for resized image
+        if [[ -f "/tmp/resized_validate-test.png" ]] || ls /tmp/resized_*.png 2>/dev/null | grep -q .; then
+            print_success "Image resizing hook executed (resized file found)"
+        else
+            print_warning "Resized image not found (hook may have run but output path differs)"
+        fi
+
+        # Show API usage if available
+        local usage=$(jq -r 'select(.type == "result") | .usage | "Input: \(.input_tokens // 0), Output: \(.output_tokens // 0), Cache: \(.cache_creation_tokens // 0)/\(.cache_read_tokens // 0)"' "$output_file" 2>/dev/null | tail -1)
+        if [[ -n "$usage" && "$usage" != "Input: 0, Output: 0, Cache: 0/0" ]]; then
+            print_metric "API Usage: $usage"
+        fi
+    else
+        print_error "No output captured from headless test"
+    fi
+
+    # Cleanup
+    rm -f "$output_file" "$hook_events_file"
+
+    if [[ $exit_code -ne 0 ]]; then
+        print_warning "Claude exited with code $exit_code (may indicate API error or rate limit)"
+    fi
+}
+
 # Print manual test instructions
 print_manual_tests() {
-    print_header "🧪 MANUAL HOOK VERIFICATION"
+    print_header "🧪 MANUAL HOOK VERIFICATION (Fallback)"
 
-    echo "Since hooks require an interactive Claude session, verify them manually:"
+    echo "If headless testing failed or was skipped, verify hooks manually:"
     echo ""
 
     echo -e "${BOLD}Test 1: PreToolUse Hook (Image Processing)${NC}"
@@ -308,8 +433,13 @@ generate_report() {
         echo "  • Privacy settings active"
         echo "  • Auto-compact enabled"
         echo "  • Hooks configured"
+        if $TEST_HOOKS; then
+            echo "  • Hooks tested in headless mode"
+        fi
         echo ""
-        echo -e "${YELLOW}Next step:${NC} Run the manual tests above to verify hook execution"
+        if ! $TEST_HOOKS; then
+            echo -e "${YELLOW}Next step:${NC} Run with --test-hooks to verify hook execution"
+        fi
     else
         print_error "CONFIGURATION INCOMPLETE"
         echo ""
@@ -322,6 +452,7 @@ generate_report() {
     echo "  Run optimizer:  ./scripts/linux/optimize-claude.sh"
     echo "  This help:      ./scripts/linux/validate.sh --help"
     echo "  Debug mode:     ./scripts/linux/validate.sh --verbose"
+    echo "  Test hooks:     ./scripts/linux/validate.sh --test-hooks"
 
     if $all_configs_ok; then
         return 0
@@ -340,7 +471,7 @@ main() {
     check_privacy
     check_auto_compact
     check_hooks
-
+    test_hooks_headless
     print_manual_tests
     generate_report
 }

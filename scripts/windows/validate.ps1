@@ -2,37 +2,43 @@
 <#
 .SYNOPSIS
     Claude Code Optimizer - Configuration Validation Suite (Windows)
-    Validates setup without requiring headless Claude execution
-    NOTE: Hooks must be tested manually in an interactive Claude session
+    Validates setup with optional headless hook testing
 
 .DESCRIPTION
     Validates:
     1. Claude Code installation
-    2. Dependencies (ImageMagick, pdftotext, markitdown)
+    2. Dependencies (ImageMagick, pdftotext, markitdown, jq)
     3. Privacy environment variables
     4. Auto-compact configuration
     5. Hook configuration (PreToolUse, PostToolUse)
+    6. Headless hook execution (optional with -TestHooks)
 
-    Hook execution must be verified manually in an interactive Claude session.
-
-.PARAMETER Verbose
+.PARAMETER VerboseOutput
     Show detailed output including full config file contents
+
+.PARAMETER TestHooks
+    Run headless hook tests (requires jq, API credits)
 
 .PARAMETER Help
     Show help message
 
 .EXAMPLE
     .\validate.ps1
-    Run full configuration validation
+    Run configuration validation only
 
 .EXAMPLE
-    .\validate.ps1 -Verbose
+    .\validate.ps1 -TestHooks
+    Run validation including headless hook tests
+
+.EXAMPLE
+    .\validate.ps1 -VerboseOutput
     Run with detailed output
 #>
 
 [CmdletBinding()]
 param(
-    [switch]$VerboseOutput
+    [switch]$VerboseOutput,
+    [switch]$TestHooks
 )
 
 # Colors
@@ -50,6 +56,7 @@ $ScriptDir = $PSScriptRoot
 $RepoDir = Join-Path $ScriptDir "..\.."
 $TestImage = Join-Path $RepoDir "tests\test-image.png"
 $TestPdf = Join-Path $RepoDir "tests\test-document.pdf"
+$ClaudeCmd = $null
 
 # Test counters
 $script:TestsPassed = 0
@@ -109,11 +116,9 @@ function Count-Tokens {
     return [math]::Floor($chars / 4)
 }
 
-# Test 1: Check Claude Code installation
-function Test-ClaudeInstallation {
-    Write-Section "🔍 CLAUDE CODE INSTALLATION"
-
-    $claudePaths = @(
+# Find Claude binary
+function Find-Claude {
+    $paths = @(
         (Get-Command claude -ErrorAction SilentlyContinue),
         "$env:USERPROFILE\.local\bin\claude.exe",
         "$env:LOCALAPPDATA\Programs\Claude\Claude.exe",
@@ -122,16 +127,23 @@ function Test-ClaudeInstallation {
         "C:\Program Files (x86)\Claude\Claude.exe"
     )
 
-    $foundClaude = $null
-    foreach ($path in $claudePaths) {
+    foreach ($path in $paths) {
         if ($path -and (Test-Path $path)) {
-            $foundClaude = $path
-            break
+            return $path
         }
     }
+    return $null
+}
 
-    if ($foundClaude) {
-        Write-Success "Claude Code found: $foundClaude"
+# Test 1: Check Claude Code installation
+function Test-ClaudeInstallation {
+    Write-Section "🔍 CLAUDE CODE INSTALLATION"
+
+    $script:ClaudeCmd = Find-Claude
+
+    if ($script:ClaudeCmd) {
+        $version = & $script:ClaudeCmd --version 2>&1 | Select-Object -First 1
+        Write-Success "Claude Code found: $version"
         return $true
     } else {
         Write-Error "Claude Code not found"
@@ -173,6 +185,21 @@ function Test-Dependencies {
     } else {
         Write-Warning "markitdown not found (optional, for Office document conversion)"
         Write-Status "Install: pip install markitdown"
+    }
+
+    # jq (for headless hook testing)
+    $jq = Get-Command jq -ErrorAction SilentlyContinue
+    if ($jq) {
+        Write-Success "jq installed (required for -TestHooks)"
+    } else {
+        if ($TestHooks) {
+            Write-Error "jq not found (required for -TestHooks)"
+            Write-Status "Install: winget install jqlang.jq"
+            Write-Status "        choco install jq"
+            $TestHooks = $false
+        } else {
+            Write-Warning "jq not found (install for -TestHooks capability)"
+        }
     }
 }
 
@@ -299,16 +326,147 @@ function Test-HookConfiguration {
     }
 }
 
+# Test 6: Headless hook execution
+function Test-HooksHeadless {
+    Write-Section "🧪 HEADLESS HOOK TESTING"
+
+    if (-not $TestHooks) {
+        Write-Warning "Skipped (use -TestHooks to enable)"
+        return
+    }
+
+    if (-not $script:ClaudeCmd) {
+        Write-Error "Claude not found, cannot run headless tests"
+        return
+    }
+
+    Write-Status "Running headless hook test (costs ~`$0.01-0.02 in API credits)..."
+    Write-Status "Command: claude -p --output-format stream-json --include-hook-events --allowedTools 'Read'"
+
+    # Create test image if needed
+    $testImage = $TestImage
+    if (-not (Test-Path $testImage)) {
+        Write-Warning "Test image not found at $testImage"
+        Write-Status "Creating a simple test image..."
+        $testImage = "$env:TEMP\validate-test.png"
+
+        $magick = Get-Command magick -ErrorAction SilentlyContinue
+        $convert = Get-Command convert -ErrorAction SilentlyContinue
+
+        if ($magick) {
+            & $magick -size 100x100 xc:blue $testImage 2>$null
+        } elseif ($convert) {
+            & $convert -size 100x100 xc:blue $testImage 2>$null
+        }
+
+        if (-not (Test-Path $testImage)) {
+            Write-Warning "Could not create test image, skipping headless test"
+            return
+        }
+    }
+
+    # Convert to WSL path if needed
+    $wslImage = $testImage
+    if ($testImage -match '^[A-Z]:') {
+        $drive = $testImage[0].ToString().ToLower()
+        $path = $testImage.Substring(2).Replace('\', '/')
+        $wslImage = "/mnt/$drive$path"
+    }
+
+    $outputFile = "$env:TEMP\claude-hook-test-$PID.jsonl"
+
+    Write-Status "Executing: Read $wslImage"
+
+    # Run Claude in headless mode with hook events
+    # Note: --include-hook-events requires --verbose flag
+    & $script:ClaudeCmd -p `
+        --output-format stream-json `
+        --verbose `
+        --include-hook-events `
+        --allowedTools "Read" `
+        "Read $wslImage" 2>&1 | Out-File -FilePath $outputFile -Encoding UTF8
+
+    $exitCode = $LASTEXITCODE
+
+    # Parse results
+    if (Test-Path $outputFile) {
+        $content = Get-Content $outputFile -Raw
+        $lines = $content -split "`n" | Where-Object { $_.Trim() }
+
+        $preCount = 0
+        $postCount = 0
+        $hookEvents = @()
+
+        foreach ($line in $lines) {
+            try {
+                $json = $line | ConvertFrom-Json -ErrorAction SilentlyContinue
+                # Hook events have type="system" with subtype="hook_started" or "hook_response"
+                if ($json.type -eq "system" -and $json.subtype -match "^hook_") {
+                    $hookEvents += "$($json.hook_name):$($json.hook_event)"
+                    if ($json.hook_name -eq "PreToolUse:Read") { $preCount++ }
+                    if ($json.hook_name -eq "PostToolUse:Read") { $postCount++ }
+                }
+            } catch {}
+        }
+
+        if ($preCount -gt 0) {
+            Write-Success "PreToolUse hook fired ($preCount times)"
+        } else {
+            Write-Error "PreToolUse hook did not fire"
+            if ($VerboseOutput) {
+                Write-Status "Hook events found:"
+                $hookEvents | ForEach-Object { Write-Status "  $_" }
+            }
+        }
+
+        if ($postCount -gt 0) {
+            Write-Success "PostToolUse hook fired ($postCount times)"
+        } else {
+            Write-Error "PostToolUse hook did not fire"
+        }
+
+        # Check for resized image (in WSL /tmp)
+        $wslCheck = wsl ls /tmp/resized_*.png 2>$null
+        if ($wslCheck) {
+            Write-Success "Image resizing hook executed (resized file found)"
+        } else {
+            Write-Warning "Resized image not found in WSL /tmp (hook may have run but output path differs)"
+        }
+
+        # Show usage if available
+        foreach ($line in $lines) {
+            try {
+                $json = $line | ConvertFrom-Json -ErrorAction SilentlyContinue
+                if ($json.type -eq "result" -and $json.usage) {
+                    $u = $json.usage
+                    $usage = "Input: $($u.input_tokens), Output: $($u.output_tokens), Cache: $($u.cache_creation_tokens)/$($u.cache_read_tokens)"
+                    Write-Metric "API Usage: $usage"
+                    break
+                }
+            } catch {}
+        }
+    } else {
+        Write-Error "No output captured from headless test"
+    }
+
+    # Cleanup
+    Remove-Item $outputFile -ErrorAction SilentlyContinue
+
+    if ($exitCode -ne 0) {
+        Write-Warning "Claude exited with code $exitCode (may indicate API error or rate limit)"
+    }
+}
+
 # Print manual test instructions
 function Write-ManualTests {
-    Write-Header "🧪 MANUAL HOOK VERIFICATION"
+    Write-Header "🧪 MANUAL HOOK VERIFICATION (Fallback)"
 
     $wslRepoDir = wsl wslpath -a "$RepoDir" 2>$null
     if (-not $wslRepoDir) {
         $wslRepoDir = "/mnt/c" + ($RepoDir -replace '^C:', '').Replace('\', '/')
     }
 
-    Write-Host "Since hooks require an interactive Claude session, verify them manually:"
+    Write-Host "If headless testing failed or was skipped, verify hooks manually:"
     Write-Host ""
 
     Write-Host "Test 1: PreToolUse Hook (Image Processing)" -Bold
@@ -360,8 +518,13 @@ function Write-Report {
         Write-Host "  • Privacy settings active"
         Write-Host "  • Auto-compact enabled"
         Write-Host "  • Hooks configured"
+        if ($TestHooks) {
+            Write-Host "  • Hooks tested in headless mode"
+        }
         Write-Host ""
-        Write-Host "Next step: Run the manual tests above to verify hook execution" -ForegroundColor $Colors.Warning
+        if (-not $TestHooks) {
+            Write-Host "Next step: Run with -TestHooks to verify hook execution" -ForegroundColor $Colors.Warning
+        }
     } else {
         Write-Error "CONFIGURATION INCOMPLETE"
         Write-Host ""
@@ -373,6 +536,7 @@ function Write-Report {
     Write-Host "Quick Commands:" -Bold
     Write-Host "  Run optimizer:  .\scripts\windows\optimize-claude.ps1"
     Write-Host "  Debug mode:     .\scripts\windows\validate.ps1 -VerboseOutput"
+    Write-Host "  Test hooks:     .\scripts\windows\validate.ps1 -TestHooks"
 
     if ($allConfigsOk) {
         exit 0
@@ -389,6 +553,6 @@ Test-Dependencies
 Test-PrivacyConfiguration
 Test-AutoCompact
 Test-HookConfiguration
-
+Test-HooksHeadless
 Write-ManualTests
 Write-Report
