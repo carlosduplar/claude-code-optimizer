@@ -190,6 +190,35 @@ check_poppler() {
     fi
 }
 
+# Check for code formatters
+check_formatters() {
+    print_header "Checking Code Formatters"
+
+    # Check for Prettier (JS/TS/CSS/HTML/JSON/YAML)
+    if command_exists prettier; then
+        print_success "Prettier is already installed"
+    else
+        print_warning "Prettier is not installed (needed for JS/TS/CSS/HTML/JSON/YAML formatting)"
+        MISSING_DEPS+=("prettier")
+    fi
+
+    # Check for black (Python)
+    if command_exists black; then
+        print_success "black is already installed"
+    else
+        print_warning "black is not installed (needed for Python formatting)"
+        MISSING_DEPS+=("black")
+    fi
+
+    # Check for autopep8 (Python fallback)
+    if command_exists autopep8; then
+        print_success "autopep8 is already installed"
+    else
+        print_warning "autopep8 is not installed (fallback for Python formatting)"
+        MISSING_DEPS+=("autopep8")
+    fi
+}
+
 # Install markitdown
 install_markitdown() {
     print_status "Installing markitdown..."
@@ -318,6 +347,66 @@ install_poppler() {
     fi
 }
 
+# Install Prettier
+install_prettier() {
+    print_status "Installing Prettier..."
+    if $DRY_RUN; then
+        echo "[DRY-RUN] Would run: npm install -g prettier"
+        return 0
+    fi
+
+    if command_exists npm; then
+        if npm install -g prettier 2>/dev/null; then
+            print_success "Prettier installed successfully"
+            return 0
+        else
+            print_error "Failed to install Prettier (try: sudo npm install -g prettier)"
+            INSTALL_FAILED+=("prettier")
+            return 1
+        fi
+    else
+        print_error "npm not found. Please install Node.js and npm first."
+        INSTALL_FAILED+=("prettier")
+        return 1
+    fi
+}
+
+# Install black (Python formatter)
+install_black() {
+    print_status "Installing black..."
+    if $DRY_RUN; then
+        echo "[DRY-RUN] Would run: pip3 install black"
+        return 0
+    fi
+
+    if pip3 install black 2>/dev/null || pip install black 2>/dev/null; then
+        print_success "black installed successfully"
+        return 0
+    else
+        print_error "Failed to install black"
+        INSTALL_FAILED+=("black")
+        return 1
+    fi
+}
+
+# Install autopep8 (Python formatter fallback)
+install_autopep8() {
+    print_status "Installing autopep8..."
+    if $DRY_RUN; then
+        echo "[DRY-RUN] Would run: pip3 install autopep8"
+        return 0
+    fi
+
+    if pip3 install autopep8 2>/dev/null || pip install autopep8 2>/dev/null; then
+        print_success "autopep8 installed successfully"
+        return 0
+    else
+        print_error "Failed to install autopep8"
+        INSTALL_FAILED+=("autopep8")
+        return 1
+    fi
+}
+
 # Check and install all dependencies
 check_and_install_deps() {
     if $SKIP_DEPS; then
@@ -331,6 +420,7 @@ check_and_install_deps() {
     check_markitdown
     check_imagemagick
     check_poppler
+    check_formatters
 
     if [[ ${#MISSING_DEPS[@]} -eq 0 ]]; then
         print_success "All dependencies are already installed!"
@@ -364,6 +454,15 @@ check_and_install_deps() {
                 ;;
             poppler)
                 install_poppler
+                ;;
+            prettier)
+                install_prettier
+                ;;
+            black)
+                install_black
+                ;;
+            autopep8)
+                install_autopep8
                 ;;
         esac
     done
@@ -661,58 +760,289 @@ EOF
     print_status "Note: Hooks in .claude/settings.json already handle cache keepalive automatically"
 }
 
-# Create settings.json with keepalive hook
+# Create settings.json with hooks
 create_settings_json() {
-    print_header "Creating settings.json with Keepalive Hook"
+    print_header "Creating settings.json with Hooks"
 
-    local SETTINGS_FILE=".claude/settings.json"
+    local CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+    local SETTINGS_FILE="$CLAUDE_DIR/settings.json"
+    local HOOKS_DIR="$CLAUDE_DIR/hooks"
+
+    # Create hooks directory
+    mkdir -p "$HOOKS_DIR"
+
+    # Create pretooluse.sh hook script
+    cat > "$HOOKS_DIR/pretooluse.sh" << 'HOOKEOF'
+#!/usr/bin/env bash
+# pretooluse.sh - PreToolUse hook for Read tool
+# Receives JSON on stdin. Exit codes: 0=proceed, 2=intercept
+
+INPUT="$(cat)"
+TOOL_NAME="$(echo "$INPUT" | jq -r '.tool_name // empty')"
+FILE_PATH="$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.filePath // empty')"
+
+LOG_FILE="/tmp/claude-hook-validation.log"
+MAX_DIMENSION="${CLAUDE_IMAGE_MAX_DIMENSION:-2000}"
+MAX_FILE_SIZE_MB="${CLAUDE_IMAGE_MAX_SIZE_MB:-5}"
+QUALITY="${CLAUDE_IMAGE_QUALITY:-85}"
+
+log() { echo "$(date -Iseconds) | PreToolUse | $1" >> "$LOG_FILE"; }
+
+# Only handle Read tool
+if [[ "$TOOL_NAME" != "Read" ]]; then exit 0; fi
+if [[ -z "$FILE_PATH" ]]; then log "NO_FILE_PATH"; exit 0; fi
+log "FILE | $FILE_PATH"
+if [[ ! -f "$FILE_PATH" ]]; then log "FILE_NOT_FOUND | $FILE_PATH"; exit 0; fi
+
+EXTENSION="${FILE_PATH##*.}"
+LOWER_EXT="$(echo "$EXTENSION" | tr '[:upper:]' '[:lower:]')"
+
+# Image handling
+image_extensions="png jpg jpeg gif webp bmp tiff tif"
+if [[ " $image_extensions " =~ " $LOWER_EXT " ]]; then
+    log "IMAGE_DETECTED | $FILE_PATH"
+    if ! command -v magick >/dev/null 2>&1 && ! command -v convert >/dev/null 2>&1; then
+        log "NO_IMAGEMAGICK | Skipping resize"; exit 0
+    fi
+    if command -v magick >/dev/null 2>&1; then
+        identify_output=$(magick identify -format "%wx%h" "$FILE_PATH" 2>/dev/null)
+    else
+        identify_output=$(convert "$FILE_PATH" -format "%wx%h" info: 2>/dev/null)
+    fi
+    if [[ "$identify_output" =~ ^([0-9]+)x([0-9]+)$ ]]; then
+        width="${BASH_REMATCH[1]}"; height="${BASH_REMATCH[2]}"
+        file_size=$(stat -f%z "$FILE_PATH" 2>/dev/null || stat -c%s "$FILE_PATH" 2>/dev/null)
+        max_bytes=$((MAX_FILE_SIZE_MB * 1024 * 1024))
+        if [[ $width -gt $MAX_DIMENSION || $height -gt $MAX_DIMENSION || $file_size -gt $max_bytes ]]; then
+            log "RESIZING | ${width}x${height} | $file_size bytes"
+            temp_file="/tmp/claude-resize-$(basename "$FILE_PATH")"
+            if command -v magick >/dev/null 2>&1; then
+                magick "$FILE_PATH" -resize "${MAX_DIMENSION}x${MAX_DIMENSION}>" -quality "$QUALITY" "$temp_file" 2>/dev/null
+            else
+                convert "$FILE_PATH" -resize "${MAX_DIMENSION}x${MAX_DIMENSION}>" -quality "$QUALITY" "$temp_file" 2>/dev/null
+            fi
+            if [[ -f "$temp_file" ]]; then
+                cp "$temp_file" "$FILE_PATH"; rm -f "$temp_file"
+                new_size=$(stat -f%z "$FILE_PATH" 2>/dev/null || stat -c%s "$FILE_PATH" 2>/dev/null)
+                log "RESIZED | $file_size -> $new_size bytes"
+            fi
+        else
+            log "WITHIN_LIMITS | ${width}x${height} | $file_size bytes"
+        fi
+    fi
+    exit 0
+fi
+
+# PDF handling
+if [[ "$LOWER_EXT" == "pdf" ]]; then
+    if command -v pdftotext >/dev/null 2>&1; then
+        temp_txt="/tmp/claude-pdf-$(date +%s).txt"
+        if pdftotext -layout "$FILE_PATH" "$temp_txt" 2>/dev/null; then
+            content=$(cat "$temp_txt" 2>/dev/null); rm -f "$temp_txt"
+            if [[ -n "$content" ]]; then
+                if [[ ${#content} -gt 9500 ]]; then
+                    content="${content:0:9500}\n\n[... TRUNCATED - file too large]"
+                fi
+                log "PDF_CONVERTED | $FILE_PATH | ${#content} chars"
+                echo "Converted PDF content from ${FILE_PATH}:" >&2
+                echo "" >&2
+                echo "$content" >&2
+                exit 2
+            fi
+        fi
+    fi
+    log "NO_PDF_CONVERTER | $FILE_PATH"; exit 0
+fi
+
+# Office documents
+doc_extensions="docx xlsx pptx doc xls ppt"
+if [[ " $doc_extensions " =~ " $LOWER_EXT " ]]; then
+    if command -v markitdown >/dev/null 2>&1; then
+        content=$(markitdown "$FILE_PATH" 2>/dev/null)
+        if [[ -n "$content" ]]; then
+            if [[ ${#content} -gt 9500 ]]; then
+                content="${content:0:9500}\n\n[... TRUNCATED]"
+            fi
+            log "DOC_CONVERTED | $FILE_PATH | ${#content} chars"
+            echo "Converted document content from ${FILE_PATH}:" >&2
+            echo "" >&2
+            echo "$content" >&2
+            exit 2
+        fi
+    fi
+    log "NO_DOC_CONVERTER | $FILE_PATH"; exit 0
+fi
+
+exit 0
+HOOKEOF
+    chmod +x "$HOOKS_DIR/pretooluse.sh"
+
+    # Create file-guard.sh hook script with improved redirection detection
+    cat > "$HOOKS_DIR/file-guard.sh" << 'HOOKEOF'
+#!/usr/bin/env bash
+# file-guard.sh - blocks writes to sensitive files and paths
+# Event: PreToolUse
+# Matcher: Write|Edit|MultiEdit|Bash
+# Exit 0 = allow | Exit 2 = block (stderr message shown to Claude)
+
+INPUT="$(cat)"
+TOOL_NAME="$(echo "$INPUT" | jq -r '.tool_name // empty')"
+FILE_PATH="$(echo "$INPUT" | jq -r '.tool_input.file_path // .tool_input.filePath // empty')"
+COMMAND="$(echo "$INPUT" | jq -r '.tool_input.command // empty')"
+
+LOG_FILE="/tmp/claude-file-guard.log"
+
+# Sensitive path patterns
+BLOCKED_PATTERNS=(
+    '\.env$'
+    '\.env\.'
+    '\.git/'
+    'package-lock\.json$'
+    'yarn\.lock$'
+    'pnpm-lock\.yaml$'
+    '\.ssh/'
+    'id_rsa'
+    'id_ed25519'
+    'credentials\.json$'
+    '\.aws/credentials'
+    '\.gnupg/'
+    'secrets\.'
+    '\.pem$'
+    '\.key$'
+)
+
+block_with_reason() {
+    local path="$1" pattern="$2"
+    echo "[file-guard] $(date -Iseconds) BLOCKED tool=$TOOL_NAME path=$path pattern=$pattern" >> "$LOG_FILE"
+    echo "BLOCKED: '$path' matches protected pattern '$pattern'. If you genuinely need to edit this file, the user must do it manually." >&2
+    exit 2
+}
+
+check_path() {
+    local path="$1"
+    if [[ -z "$path" ]]; then return; fi
+    for pattern in "${BLOCKED_PATTERNS[@]}"; do
+        if echo "$path" | grep -qE "$pattern"; then
+            block_with_reason "$path" "$pattern"
+        fi
+    done
+}
+
+# Extract file path from shell redirections (e.g., "echo x > ~/.env" or "echo x >~/.env")
+extract_redirect_target() {
+    local cmd="$1"
+    # Match redirection operators followed by optional space and a path
+    # Handles: > ~/.env, >>~/.env, 2> file, etc.
+    if [[ "$cmd" =~ [0-9]*[\>]+[[:space:]]*([~/\.][^[:space:]|;\"'&]+) ]]; then
+        local target="${BASH_REMATCH[1]}"
+        # Remove trailing punctuation that might be captured
+        target="${target%%[;|&\"'\"\`]*}"
+        # Expand ~ to HOME
+        target="${target/#\~/$HOME}"
+        echo "$target"
+    fi
+}
+
+# Write / Edit / MultiEdit: check tool_input.file_path
+if [[ "$TOOL_NAME" == "Write" || "$TOOL_NAME" == "Edit" || "$TOOL_NAME" == "MultiEdit" ]]; then
+    check_path "$FILE_PATH"
+fi
+
+# Bash: scan the command string for suspicious patterns
+if [[ "$TOOL_NAME" == "Bash" && -n "$COMMAND" ]]; then
+    # Check direct path patterns in command
+    for pattern in "${BLOCKED_PATTERNS[@]}"; do
+        if echo "$COMMAND" | grep -qE "$pattern"; then
+            # Check if this is a redirection target
+            REDIRECT_TARGET=$(extract_redirect_target "$COMMAND")
+            if [[ -n "$REDIRECT_TARGET" ]]; then
+                for rp in "${BLOCKED_PATTERNS[@]}"; do
+                    if echo "$REDIRECT_TARGET" | grep -qE "$rp"; then
+                        echo "[file-guard] $(date -Iseconds) BLOCKED bash redirection to protected path: $REDIRECT_TARGET" >> "$LOG_FILE"
+                        echo "BLOCKED: Bash command redirects to protected path '$REDIRECT_TARGET'. If intentional, the user must run this command manually." >&2
+                        exit 2
+                    fi
+                done
+            fi
+            # Also block direct mentions in non-read commands
+            if [[ "$COMMAND" =~ (tee|cp|mv|cat.*\>|echo.*\>) ]]; then
+                echo "[file-guard] $(date -Iseconds) BLOCKED bash command matching pattern=$pattern" >> "$LOG_FILE"
+                echo "BLOCKED: Bash command appears to touch a protected path (pattern: $pattern). If intentional, the user must run this command manually." >&2
+                exit 2
+            fi
+        fi
+    done
+fi
+
+echo "[file-guard] $(date -Iseconds) ALLOWED tool=$TOOL_NAME path=$FILE_PATH" >> "$LOG_FILE"
+exit 0
+HOOKEOF
+    chmod +x "$HOOKS_DIR/file-guard.sh"
+
+    # Create posttooluse.sh hook script
+    cat > "$HOOKS_DIR/posttooluse.sh" << 'HOOKEOF'
+#!/usr/bin/env bash
+INPUT="$(cat)"
+TOOL_NAME="$(echo "$INPUT" | jq -r '.tool_name // empty')"
+LOG_FILE="/tmp/claude-hook-validation.log"
+echo "$(date -Iseconds) | PostToolUse | FIRED | Tool: ${TOOL_NAME:-unknown}" >> "$LOG_FILE"
+exit 0
+HOOKEOF
+    chmod +x "$HOOKS_DIR/posttooluse.sh"
 
     if [[ -f "$SETTINGS_FILE" ]]; then
         print_warning "$SETTINGS_FILE already exists"
-        read -p "Create backup and add keepalive hook? (y/N) " -n 1 -r
+        read -p "Create backup and overwrite? (y/N) " -n 1 -r
         echo ""
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             return 0
         fi
-
-        if ! $DRY_RUN; then
-            cp "$SETTINGS_FILE" "$SETTINGS_FILE.backup.$(date +%Y%m%d%H%M%S)"
-        fi
+        cp "$SETTINGS_FILE" "$SETTINGS_FILE.backup.$(date +%Y%m%d%H%M%S)"
     fi
 
     if $DRY_RUN; then
-        echo "[DRY-RUN] Would create $SETTINGS_FILE with keepalive hook"
+        echo "[DRY-RUN] Would create $SETTINGS_FILE with hooks"
         return 0
     fi
 
-    mkdir -p "$(dirname "$SETTINGS_FILE")"
-
-    cat > "$SETTINGS_FILE" << 'EOF'
+    # Create settings.json with hook references
+    cat > "$SETTINGS_FILE" << EOF
 {
+  "\$schema": "https://json.schemastore.org/claude-code-settings.json",
   "autoCompactEnabled": true,
   "hooks": {
-    "PreToolUse": [{
-      "matcher": "Read",
-      "hooks": [{
-        "type": "command",
-        "command": "if command -v magick >/dev/null 2>&1 && [ -f \"$ARGUMENTS\" ] && [[ \"$ARGUMENTS\" =~ \\.(png|jpg|jpeg)$ ]]; then magick \"$ARGUMENTS\" -resize 2000x2000\\> -quality 85 /tmp/resized_$(basename \"$ARGUMENTS\"); fi",
-        "if": "Read(*.{png,jpg,jpeg})"
-      }]
-    }],
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [{
+          "type": "command",
+          "command": "bash $HOOKS_DIR/pretooluse.sh",
+          "timeout": 30
+        }]
+      },
+      {
+        "matcher": "Write|Edit|MultiEdit|Bash",
+        "hooks": [{
+          "type": "command",
+          "command": "bash $HOOKS_DIR/file-guard.sh",
+          "timeout": 10
+        }]
+      }
+    ],
     "PostToolUse": [{
       "matcher": "*",
       "hooks": [{
         "type": "command",
-        "command": "echo '{\"cache_keepalive\": \"'$(date +%s)'\"}'",
-        "if": "*"
+        "command": "bash $HOOKS_DIR/posttooluse.sh",
+        "timeout": 5
       }]
     }]
   }
 }
 EOF
 
-    print_success "Created $SETTINGS_FILE with keepalive hook"
-    print_status "The PostToolUse hook fires after every tool use, keeping cache warm"
+    print_success "Created $SETTINGS_FILE with hooks"
+    print_status "Hooks configured: PreToolUse (Read, Write/Bash with file-guard), PostToolUse"
 }
 
 # Verify environment variables

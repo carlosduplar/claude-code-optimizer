@@ -162,6 +162,107 @@ function Test-ImageMagick {
     }
 }
 
+function Test-Formatter {
+    Write-Header "Checking Code Formatters"
+
+    # Check for Prettier
+    $prettier = Get-Command prettier -ErrorAction SilentlyContinue
+    if ($prettier) {
+        Write-Success "Prettier is already installed"
+    } else {
+        Write-WarningLine "Prettier is not installed (needed for JS/TS/CSS/HTML/JSON/YAML formatting)"
+        $script:MissingDeps += "prettier"
+    }
+
+    # Check for black (Python)
+    $black = Get-Command black -ErrorAction SilentlyContinue
+    if ($black) {
+        Write-Success "black is already installed"
+    } else {
+        Write-WarningLine "black is not installed (needed for Python formatting)"
+        $script:MissingDeps += "black"
+    }
+
+    # Check for autopep8 (Python fallback)
+    $autopep8 = Get-Command autopep8 -ErrorAction SilentlyContinue
+    if ($autopep8) {
+        Write-Success "autopep8 is already installed"
+    } else {
+        Write-WarningLine "autopep8 is not installed (fallback for Python formatting)"
+        $script:MissingDeps += "autopep8"
+    }
+}
+
+function Install-Prettier {
+    Write-Status "Installing Prettier..."
+    if ($DryRun) {
+        Write-Host "[DRY-RUN] Would run: npm install -g prettier"
+        return
+    }
+
+    $npm = Get-Command npm -ErrorAction SilentlyContinue
+    if (-not $npm) {
+        Write-ErrorLine "npm not found. Please install Node.js and npm first."
+        $script:InstallFailed += "prettier"
+        return
+    }
+
+    try {
+        & npm install -g prettier 2>$null
+        $newPrettier = Get-Command prettier -ErrorAction SilentlyContinue
+        if ($newPrettier) {
+            Write-Success "Prettier installed successfully"
+        } else {
+            throw "Installation verification failed"
+        }
+    } catch {
+        Write-ErrorLine "Failed to install Prettier: $_"
+        $script:InstallFailed += "prettier"
+    }
+}
+
+function Install-Black {
+    Write-Status "Installing black..."
+    if ($DryRun) {
+        Write-Host "[DRY-RUN] Would run: pip install black"
+        return
+    }
+
+    try {
+        & $script:PythonCmd -m pip install black 2>$null
+        $newBlack = Get-Command black -ErrorAction SilentlyContinue
+        if ($newBlack) {
+            Write-Success "black installed successfully"
+        } else {
+            throw "Installation verification failed"
+        }
+    } catch {
+        Write-ErrorLine "Failed to install black: $_"
+        $script:InstallFailed += "black"
+    }
+}
+
+function Install-Autopep8 {
+    Write-Status "Installing autopep8..."
+    if ($DryRun) {
+        Write-Host "[DRY-RUN] Would run: pip install autopep8"
+        return
+    }
+
+    try {
+        & $script:PythonCmd -m pip install autopep8 2>$null
+        $newAutopep8 = Get-Command autopep8 -ErrorAction SilentlyContinue
+        if ($newAutopep8) {
+            Write-Success "autopep8 installed successfully"
+        } else {
+            throw "Installation verification failed"
+        }
+    } catch {
+        Write-ErrorLine "Failed to install autopep8: $_"
+        $script:InstallFailed += "autopep8"
+    }
+}
+
 function Test-Poppler {
     Write-Status "Checking poppler (pdftotext)..."
     $pdftotext = Get-Command pdftotext.exe -ErrorAction SilentlyContinue
@@ -201,11 +302,29 @@ function Install-Dependencies {
     Test-ImageMagick
     Test-Poppler
     Test-Bash
+    Test-Formatter
     if ($script:MissingDeps.Count -eq 0) {
         Write-Success "All dependencies are already installed!"
         return
     }
     Write-WarningLine "Missing dependencies: $($script:MissingDeps -join ', ')"
+
+    $install = Read-Host "Install missing dependencies? (y/N)"
+    if ($install -notmatch '^[Yy]$') {
+        Write-WarningLine "Skipping dependency installation"
+        return
+    }
+
+    foreach ($dep in $script:MissingDeps) {
+        switch ($dep) {
+            "markitdown" { pip install markitdown }
+            "imagemagick" { Write-WarningLine "Please install ImageMagick manually from https://imagemagick.org" }
+            "poppler" { Write-WarningLine "Please install poppler from https://github.com/oschwartz10612/poppler-windows/releases" }
+            "prettier" { Install-Prettier }
+            "black" { Install-Black }
+            "autopep8" { Install-Autopep8 }
+        }
+    }
 }
 
 function Set-ClaudeSettings {
@@ -883,6 +1002,24 @@ function Write-Log {
     Add-Content -Path $LOG_FILE -Value "[file-guard] $timestamp $Message" -ErrorAction SilentlyContinue
 }
 
+# Extract file path from shell redirection (e.g., "echo x > ~/.env" or "echo x >~/.env")
+function Get-RedirectTarget {
+    param([string]$Command)
+    # Match redirection operators: >, >>, 1>, 2>, etc. followed by optional space and a path
+    $redirectPattern = ''[0-9]*[>]+\s*([~\./][^\s|;"''&]+)''
+    if ($Command -match $redirectPattern) {
+        $target = $Matches[1]
+        # Remove trailing punctuation
+        $target = $target -replace ''[;|&"''''`]+$''
+        # Expand ~ to user profile
+        if ($target.StartsWith(''~'')) {
+            $target = $target -replace ''^~'', $env:USERPROFILE
+        }
+        return $target
+    }
+    return $null
+}
+
 # Read JSON from stdin
 $inputJson = $null
 try {
@@ -903,7 +1040,7 @@ $command = $payload.tool_input.command
 function Block-WithReason {
     param([string]$Path, [string]$Pattern)
     Write-Log "BLOCKED tool=$toolName path=$Path pattern=$Pattern"
-    [Console]::Error.WriteLine("BLOCKED: ''$Path'' matches protected pattern ''$Pattern''. If you genuinely need to edit this file, the user must do it manually.")
+    [Console]::Error.WriteLine("BLOCKED: ''''$Path'''' matches protected pattern ''''$Pattern''''. If you genuinely need to edit this file, the user must do it manually.")
     exit 2
 }
 
@@ -918,13 +1055,35 @@ function Test-BlockedPath {
 # Write / Edit / MultiEdit: check tool_input.file_path
 if ($toolName -in @(''Write'', ''Edit'', ''MultiEdit'')) { Test-BlockedPath -Path $filePath }
 
-# Bash: scan the command string for suspicious path patterns
+# Bash: scan the command string for suspicious patterns
 if ($toolName -eq ''Bash'' -and $command) {
+    # First check for shell redirections to sensitive files
+    $redirectTarget = Get-RedirectTarget -Command $command
+    if ($redirectTarget) {
+        foreach ($pattern in $BLOCKED_PATTERNS) {
+            if ($redirectTarget -match $pattern) {
+                Write-Log "BLOCKED bash redirection to protected path: $redirectTarget"
+                [Console]::Error.WriteLine("BLOCKED: Bash command redirects to protected path ''''$redirectTarget''''. If intentional, the user must run this command manually.")
+                exit 2
+            }
+        }
+    }
+
+    # Also check for direct path patterns in write-related commands
+    $writeCommands = @(''tee'', ''cp'', ''mv'', ''copy'', ''move'', ''type.*>'', ''echo.*>'', ''out-file'')
+    $isWriteCommand = $false
+    foreach ($wc in $writeCommands) {
+        if ($command -match $wc) { $isWriteCommand = $true; break }
+    }
+
     foreach ($pattern in $BLOCKED_PATTERNS) {
         if ($command -match $pattern) {
-            Write-Log "BLOCKED bash command matching pattern=$pattern"
-            [Console]::Error.WriteLine("BLOCKED: Bash command appears to touch a protected path (pattern: $pattern). If intentional, the user must run this command manually.")
-            exit 2
+            # Only block if it''s a write command or has redirection
+            if ($isWriteCommand -or $redirectTarget -or $command -match ''[>]'') {
+                Write-Log "BLOCKED bash command matching pattern=$pattern"
+                [Console]::Error.WriteLine("BLOCKED: Bash command appears to touch a protected path (pattern: $pattern). If intentional, the user must run this command manually.")
+                exit 2
+            }
         }
     }
 }
