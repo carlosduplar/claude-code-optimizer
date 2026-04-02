@@ -12,27 +12,27 @@ This repository documents **obscure, undocumented, and internal** aspects of Cla
 
 | Document | Description | Why Not in Official Docs |
 |----------|-------------|--------------------------|
-| [Query Flow & Message Streaming](query-flow.md) | Streaming fallback layers, retry logic with exponential backoff + jitter, 529 error handling, side query architecture | Internal implementation details |
-| [Session Memory & Context Management](session-memory.md) | Proactive/reactive compaction, memdir taxonomy, CACHED_MICROCOMPACT, REACTIVE_COMPACT feature flags | Internal memory system |
-| [Tool System Architecture](tool-system.md) | Tool registration pipeline, MCP/LSP integration internals, permission context flow | Implementation details |
-| [Permission System & Auto-Mode Classifier](permission-system.md) | Two-stage XML classifier, iron gate fail-closed logic, denial tracking circuit breakers | Internal security mechanisms |
-| [Skill & Plugin System](skill-plugin-system.md) | Bundled skills registry, dynamic skill discovery, workflow scripts, MCP skill builders | Internal extension architecture |
-| [Prompt Caching & Keepalive](prompt-caching.md) | 5-minute TTL behavior, cache invalidation triggers, CACHED_MICROCOMPACT, keepalive strategies | API-level cache internals |
+| [Query Flow & Message Streaming](docs/query-flow.md) | Streaming fallback layers, retry logic with exponential backoff + jitter, 529 error handling, side query architecture | Internal implementation details |
+| [Session Memory & Context Management](docs/session-memory.md) | Proactive/reactive compaction, memdir taxonomy, CACHED_MICROCOMPACT, REACTIVE_COMPACT feature flags | Internal memory system |
+| [Tool System Architecture](docs/tool-system.md) | Tool registration pipeline, MCP/LSP integration internals, permission context flow | Implementation details |
+| [Permission System & Auto-Mode Classifier](docs/permission-system.md) | Two-stage XML classifier, iron gate fail-closed logic, denial tracking circuit breakers | Internal security mechanisms |
+| [Skill & Plugin System](docs/skill-plugin-system.md) | Bundled skills registry, dynamic skill discovery, workflow scripts, MCP skill builders | Internal extension architecture |
+| [Prompt Caching & Keepalive](docs/prompt-caching.md) | 5-minute TTL behavior, cache invalidation triggers, CACHED_MICROCOMPACT, keepalive strategies | API-level cache internals |
 
 ### Hidden/Internal Features
 
 | Document | Description |
 |----------|-------------|
-| [Undocumented Features](undocumented-features.md) | 88+ compile-time feature flags, hidden CLI flags, fast-path subcommands, 60+ internal environment variables |
-| [Anthropic-Only Commands](ant-only-commands.md) | 24 commands gated behind `USER_TYPE=ant`—which work, which are stubs, side effects |
-| [Telemetry & Privacy Internals](telemetry-privacy.md) | Datadog endpoints, 1P event logging schema, PII sanitization rules, proto column routing |
+| [Undocumented Features](docs/undocumented-features.md) | 88+ compile-time feature flags, hidden CLI flags, fast-path subcommands, 60+ internal environment variables |
+| [Anthropic-Only Commands](docs/ant-only-commands.md) | 24 commands gated behind `USER_TYPE=ant`—which work, which are stubs, side effects |
+| [Telemetry & Privacy Internals](docs/telemetry-privacy.md) | Datadog endpoints, 1P event logging schema, PII sanitization rules, proto column routing |
 
 ### Practical Tools
 
 | Document | Description |
 |----------|-------------|
-| [Optimization Scripts](optimization-scripts.md) | Automated setup scripts for token efficiency and privacy configuration |
-| [Validation Suite](validation-suite.md) | Test framework to verify all optimization claims with before/after comparison |
+| [Optimization Scripts](docs/optimization-scripts.md) | Automated setup scripts for token efficiency and privacy configuration |
+| [Validation](docs/validation.md) | Functional testing to verify hooks work correctly |
 
 **Tested Environments:**
 - Windows: PowerShell 7.6.0
@@ -40,27 +40,36 @@ This repository documents **obscure, undocumented, and internal** aspects of Cla
 
 ---
 
-## 🏗️ Repository Structure
+## 📁 Repository Structure
 
 ```
-claude-code/
-├── docs/                          # This documentation
+claude-code-optimizer/
+├── docs/                          # Documentation
 │   ├── query-flow.md              # API streaming internals
-│   ├── session-memory.md          # Memory & compaction
-│   ├── tool-system.md             # Tool framework internals
-│   ├── permission-system.md       # Auto-mode classifier
-│   ├── skill-plugin-system.md     # Skills & plugins
-│   ├── prompt-caching.md          # Cache TTL & keepalive strategies
-│   ├── undocumented-features.md   # Feature flags & hidden commands
-│   ├── ant-only-commands.md       # Internal commands
-│   ├── telemetry-privacy.md       # Telemetry internals
-│   ├── optimization-scripts.md    # Setup automation
-│   └── validation-suite.md        # Verification testing framework
-├── validate-optimizations.sh      # Validation script (Linux/macOS/WSL)
-├── validate-optimizations.ps1     # Validation script (Windows)
-├── optimize-claude.sh             # Optimizer script (Linux/macOS/WSL)
-├── optimize-claude.ps1            # Optimizer script (Windows)
-└── src/                           # Source code (not included)
+│   ├── session-memory.md            # Memory & compaction
+│   ├── tool-system.md               # Tool framework internals
+│   ├── permission-system.md         # Auto-mode classifier
+│   ├── skill-plugin-system.md       # Skills & plugins
+│   ├── prompt-caching.md            # Cache TTL & keepalive strategies
+│   ├── undocumented-features.md     # Feature flags & hidden commands
+│   ├── ant-only-commands.md         # Internal commands
+│   ├── telemetry-privacy.md         # Telemetry internals
+│   ├── optimization-scripts.md      # Setup automation guide
+│   ├── validation.md                # Verification testing framework
+│   └── LEGAL.md                     # Legal information
+├── scripts/                       # Automation scripts
+│   ├── linux/                       # Bash scripts
+│   │   ├── optimize-claude.sh
+│   │   └── validate.sh
+│   └── windows/                     # PowerShell scripts
+│       ├── optimize-claude.ps1
+│       └── validate.ps1
+├── tests/                         # Test files
+│   ├── test-image.png
+│   └── test-document.pdf
+├── README.md                      # This file
+├── .gitattributes                 # Git configuration
+└── .gitignore                     # Git ignore rules
 ```
 
 ---
@@ -92,11 +101,10 @@ Anthropic's API has a **5-minute TTL** on prompt cache entries. After 5 minutes 
 
 **Keepalive strategies:**
 1. **Hook-based:** PostToolUse hook that fires every 4 minutes
-2. **Background ping:** tmux script sending no-op messages
-3. **`/loop` command:** Built-in for active tasks
-4. **Pre-flight warmup:** Small request after breaks
+2. **`/loop` command:** Built-in for active tasks
+3. **Pre-flight warmup:** Small request after breaks
 
-See [prompt-caching.md](prompt-caching.md) for implementation details.
+See [docs/prompt-caching.md](docs/prompt-caching.md) for implementation details.
 
 ### Hidden CLI Subcommands
 
@@ -128,7 +136,7 @@ Notable undocumented variables:
 | `ENABLE_PID_BASED_VERSION_LOCKING` | PID-based update locking |
 | `CLAUDE_CODE_COWORKER_TYPE` | Coworker type for telemetry |
 
-See [undocumented-features.md](undocumented-features.md) for the full list.
+See [docs/undocumented-features.md](docs/undocumented-features.md) for the full list.
 
 ---
 

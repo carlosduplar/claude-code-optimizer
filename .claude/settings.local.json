@@ -1,8 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(bash -n /c/projects/claude-code-optimizer/optimize-claude.sh)",
-      "Bash(powershell -Command \"Get-Command Test-Formatter\")"
-    ]
-  }
-}

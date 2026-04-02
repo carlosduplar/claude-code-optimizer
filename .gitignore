@@ -1,0 +1,19 @@
+# Local Claude Code configuration (user-level configs are in ~/.claude/)
+.claude/
+
+# Development/planning artifacts
+IMPLEMENTATION-PLAN*.md
+CLAUDE-CODE-TEST-SCRIPT.md
+
+# Test output files
+tests/claude-output-*.txt
+tests/extracted-text.txt
+
+# Temporary files
+*.tmp
+*.temp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
