@@ -1304,6 +1304,10 @@ HOOKEOF
 {
   "\$schema": "https://json.schemastore.org/claude-code-settings.json",
   "autoCompactEnabled": true,
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -1467,7 +1471,7 @@ main() {
         echo -e "${BOLD}Privacy mode:${NC} Standard (telemetry disabled)"
     fi
 
-    local SUMMARY_HOOKS="Auto-compact, image pre-processing, cache keepalive"
+    local SUMMARY_HOOKS="Auto-compact, image pre-processing, cache keepalive, no-attribution"
     if $AUTO_APPROVE; then SUMMARY_HOOKS+=", auto-approve"; fi
     if $AUTO_FORMAT; then SUMMARY_HOOKS+=", auto-format"; fi
     echo -e "${BOLD}Hooks configured:${NC} $SUMMARY_HOOKS"

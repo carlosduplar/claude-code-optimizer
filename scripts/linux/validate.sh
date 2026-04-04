@@ -218,6 +218,17 @@ check_auto_compact() {
         print_status "Run optimize-claude.sh or manually edit $claude_config"
     fi
 
+    # Check attribution settings (saves ~50-100 tokens per commit/PR)
+    if grep -q '"attribution"' "$claude_config" 2>/dev/null; then
+        if grep -q '"commit":\s*""' "$claude_config" 2>/dev/null && grep -q '"pr":\s*""' "$claude_config" 2>/dev/null; then
+            print_success "attribution: commit and pr set to empty (saves ~50-100 tokens)"
+        else
+            print_warning "attribution found but may not be empty strings"
+        fi
+    else
+        print_warning "attribution not configured (optional, saves ~50-100 tokens per commit/PR)"
+    fi
+
     if [[ "$VERBOSE" == "true" ]]; then
         echo ""
         print_status "Current config contents:"

@@ -268,6 +268,17 @@ function Test-AutoCompact {
         Write-Status "Run optimize-claude.ps1 or manually edit $claudeConfig"
     }
 
+    # Check attribution settings (saves ~50-100 tokens per commit/PR)
+    if ($configContent -match '"attribution"') {
+        if ($configContent -match '"commit":\s*""' -and $configContent -match '"pr":\s*""') {
+            Write-Success "attribution: commit and pr set to empty (saves ~50-100 tokens)"
+        } else {
+            Write-Warning "attribution found but may not be empty strings"
+        }
+    } else {
+        Write-Warning "attribution not configured (optional, saves ~50-100 tokens per commit/PR)"
+    }
+
     if ($VerboseOutput) {
         Write-Host ""
         Write-Status "Current config contents:"

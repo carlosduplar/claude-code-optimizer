@@ -420,6 +420,10 @@ function Set-ClaudeSettings {
     $settings = @{
         '$schema' = "https://json.schemastore.org/claude-code-settings.json"
         autoCompactEnabled = $true
+        attribution = @{
+            commit = ""
+            pr = ""
+        }
         env = $envVars
         hooks = $hooks
     }
@@ -1352,6 +1356,8 @@ function Test-Optimizations {
     }
     if ($settings) {
         $results += @{ Check = "autoCompactEnabled is true"; Pass = ($settings.autoCompactEnabled -eq $true) }
+        $results += @{ Check = "attribution.commit is empty"; Pass = ($settings.attribution.commit -eq "") }
+        $results += @{ Check = "attribution.pr is empty"; Pass = ($settings.attribution.pr -eq "") }
         $expectedVars = @("BASH_MAX_OUTPUT_LENGTH", "DISABLE_TELEMETRY", "CLAUDE_CODE_AUTO_COMPACT_WINDOW", "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE", "CLAUDE_CODE_DISABLE_AUTO_MEMORY")
         if (-not $ReducedPrivacy) { $expectedVars += "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC" }
         foreach ($var in $expectedVars) {
@@ -1404,6 +1410,11 @@ function Test-Optimizations {
 function Show-Summary {
     Write-Header "Configuration Summary"
     Write-Success "Claude Code optimization complete!"
+    Write-Host ""
+    Write-Host "Settings configured:" -ForegroundColor Cyan
+    Write-Host "  - autoCompactEnabled: true"
+    Write-Host "  - attribution.commit: '' (empty, saves ~50-100 tokens per commit)"
+    Write-Host "  - attribution.pr: '' (empty, saves ~50-100 tokens per PR)"
     Write-Host ""
     Write-Host "Configuration files created/updated:" -ForegroundColor Cyan
     Write-Host "  - ~/.claude/settings.json (main configuration)"

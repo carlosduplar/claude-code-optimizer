@@ -210,6 +210,24 @@ Both scripts enable `autoCompactEnabled` in Claude's settings:
 - Prevents expensive blocking rate limits
 - Preserves recent context (unlike `/clear`)
 
+### 4. Remove Attribution Text
+
+Configure empty attribution strings in `settings.json` to hide the "Co-authored by" attribution on commits and PRs:
+
+```json
+{
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  }
+}
+```
+
+**Savings:** ~50–100 tokens per commit/PR operation
+**Complexity:** Edit `settings.json`
+
+This removes the default Claude Code attribution signature from git commits and pull request descriptions, reducing token usage on every commit or PR created through Claude Code.
+
 ## Command Line Options
 
 ### Bash Script (`optimize-claude.sh`)
@@ -348,6 +366,7 @@ After running these scripts:
 | **Session length** | Longer before rate limits | Run validation suite |
 | **Privacy** | Maximum (default) | Run validation suite |
 | **Cost** | Significantly lower per task | Monitor `/cost` in Claude |
+| **Attribution** | ~50-100 tokens saved per commit/PR | Check git logs for no "Co-authored by" |
 
 **Verify the optimizations are working:**
 
