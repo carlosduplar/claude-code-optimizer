@@ -41,33 +41,27 @@ After running the optimizer, validate that hooks are working:
 ### Linux / macOS / WSL
 
 ```bash
-# 1. Validate current state (optional but recommended)
-./scripts/linux/validate.sh --before
-
-# 2. Run optimizer
+# 1. Run optimizer
 ./scripts/linux/optimize-claude.sh
 
-# 3. Restart shell to apply env vars
+# 2. Restart shell to apply env vars
 source ~/.bashrc  # or ~/.zshrc
 
-# 4. Verify optimizations are working
-./scripts/linux/validate.sh --after
+# 3. Verify optimizations are working
+./scripts/linux/validate.sh --verbose
 ```
 
 ### Windows (Run as Administrator)
 
 ```powershell
-# 1. Validate current state (optional but recommended)
-.\scripts\windows\validate.ps1 -Before
-
-# 2. Run optimizer
+# 1. Run optimizer
 .\scripts\windows\optimize-claude.ps1
 
-# 3. Restart PowerShell to apply env vars
+# 2. Restart PowerShell to apply env vars
 # Close and reopen PowerShell window
 
-# 4. Verify optimizations are working
-.\scripts\windows\validate.ps1 -After
+# 3. Verify optimizations are working
+.\scripts\windows\validate.ps1 -VerboseOutput
 ```
 
 ---
@@ -95,23 +89,7 @@ The validation suite tests every claim made by the optimization scripts:
 6. **Document Conversion** - Can extract text from PDFs
 7. **Cache Keepalive** - Hook mechanism in place
 
-### Before/After Comparison
-
-Capture baseline state before optimization, then compare after:
-
-```bash
-# Linux/macOS
-./scripts/linux/validate.sh --before
-./scripts/linux/optimize-claude.sh
-source ~/.bashrc
-./scripts/linux/validate.sh --after
-
-# Windows
-.\scripts\windows\validate.ps1 -Before
-.\scripts\windows\optimize-claude.ps1
-# Restart PowerShell
-.\scripts\windows\validate.ps1 -After
-```
+### Validation Output
 
 **Sample Output:**
 

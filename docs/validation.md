@@ -1,6 +1,14 @@
-# Claude Code Hook Validation - Headless Mode
+# Claude Code Hook Validation
 
-This script **automatically runs Claude Code in headless mode**, sends commands to trigger hooks, and validates that the hooks actually fire by checking for evidence.
+This document describes how to validate that the Claude Code optimization hooks are correctly configured and working.
+
+## Overview
+
+The validation script:
+1. **Checks configuration** - Verifies hooks are properly set up in settings.json
+2. **Tests dependencies** - Ensures ImageMagick, pdftotext, and markitdown are installed
+3. **Validates privacy settings** - Confirms environment variables are set correctly
+4. **Optional headless testing** - Can run Claude Code in headless mode to verify hooks actually fire
 
 ## The Problem
 
@@ -14,14 +22,23 @@ This is error-prone and doesn't provide automated validation.
 
 ## The Solution
 
-The headless validation script:
+The validation script provides two modes:
+
+### Config-Only Mode (Default)
+Checks that all configurations are in place without running Claude Code:
+- Hooks configured in settings.json
+- Dependencies installed
+- Environment variables set
+
+### Headless Mode (`--test-hooks`)
+Actually runs Claude Code programmatically to verify hooks fire:
 1. **Creates test files** automatically
-2. **Runs Claude Code programmatically** using `claude -p` (non-interactive mode)
+2. **Runs Claude Code** using `claude -p` (non-interactive mode)
 3. **Sends commands** like `Read test-image.png` via stdin
 4. **Captures all output** to files
 5. **Checks for evidence**:
    - Resized images in `/tmp/` (PreToolUse proof)
-   - `cache_keepalive` in output (PostToolUse proof)
+   - Hook events in output (PostToolUse proof)
 6. **Generates report** with pass/fail and evidence
 
 ## Requirements
@@ -29,6 +46,7 @@ The headless validation script:
 - Claude Code installed and in PATH
 - Hooks already configured (run `optimize-claude.ps1/sh` first)
 - ImageMagick installed (for image tests)
+- `jq` installed (for `--test-hooks` mode)
 
 ## Quick Start
 
@@ -45,9 +63,6 @@ The headless validation script:
 
 # 4. View detailed output
 ./scripts/linux/validate.sh --verbose
-
-# 5. Keep artifacts for inspection
-./scripts/linux/validate.sh --keep
 ```
 
 ### Windows
@@ -62,10 +77,7 @@ The headless validation script:
 .\scripts\windows\validate.ps1
 
 # 4. View detailed output
-.\scripts\windows\validate.ps1 -Detailed
-
-# 5. Keep artifacts for inspection
-.\scripts\windows\validate.ps1 -Keep
+.\scripts\windows\validate.ps1 -VerboseOutput
 ```
 
 ## How It Works
@@ -124,42 +136,55 @@ The headless validation script:
 
 ## Sample Output
 
-### Success Case
+### Success Case (Config-Only)
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- Claude Code Hook Validation - Headless Mode
+ Claude Code Optimizer - Configuration Validation
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-[INFO] This script will:
-[INFO] 1. Create test files
-[INFO] 2. Run Claude Code in headless mode (-p)
-[INFO] 3. Send Read commands to trigger hooks
-[INFO] 4. Verify hooks fired by checking evidence
+[INFO] Claude Code found: 0.2.45
+[✓ PASS] ImageMagick installed
+[✓ PASS] pdftotext (poppler) installed
+[✓ PASS] markitdown installed
+[✓ PASS] DISABLE_TELEMETRY=1 (Disable all telemetry)
+[✓ PASS] CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 (Block non-essential traffic)
+[✓ PASS] OTEL_LOG_USER_PROMPTS=0 (Don't log user prompts)
+[✓ PASS] OTEL_LOG_TOOL_DETAILS=0 (Don't log tool details)
+[✓ PASS] CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000 (3 minute compact window)
+[METRIC] Privacy Score: 5/5
+[✓ PASS] Maximum privacy configured
+[✓ PASS] autoCompactEnabled: true
+[✓ PASS] PreToolUse hook configured
+[✓ PASS] PostToolUse hook configured
 
-CHECKING PREREQUISITES
-======================
-[PASS] Claude Code found: /usr/local/bin/claude
-[INFO] Claude Code version: 0.2.45
-[PASS] Found settings.json
-[PASS] PreToolUse hook configured
-[PASS] PostToolUse hook configured
-[PASS] ImageMagick found
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ 📊 VALIDATION SUMMARY
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-CREATING TEST FILES
-===================
-[INFO] Test directory: ./tests
-[PASS] Created test-image.png (3000x3000 pixels)
-[PASS] Created test-doc.txt
+Test Results: Passed: 12 | Failed: 0 | Skipped: 0
 
-TEST 1: PreToolUse Hook (Image Processing)
-=========================================
-[INFO] Testing if PreToolUse hook fires when reading an image...
-[INFO] This hook should resize the image to max 2000x2000
-[INFO] Cleaned up previous resized images
-[INFO] Reading image: /path/to/test-image.png
-[INFO] Running: Read image file
-[INFO] Command: echo 'Read /path/to/test-image.png' | claude -p
+[✓ PASS] ALL CONFIGURATIONS VALID ✓
+
+Your Claude Code environment is properly configured:
+  • Dependencies installed
+  • Privacy settings active
+  • Auto-compact enabled
+  • Hooks configured
+```
+
+### Success Case (With `--test-hooks`)
+
+```
+🧪 HEADLESS HOOK TESTING
+=========================
+[INFO] Running headless hook test (costs ~$0.01-0.02 in API credits)...
+[INFO] Executing: Read /path/to/test-image.png
+[✓ PASS] PreToolUse hook fired (1 times)
+[✓ PASS] PostToolUse hook fired (1 times)
+[✓ PASS] Image resizing hook executed (resized file found)
+[METRIC] API Usage: Input: 1500, Output: 250, Cache: 0/0
+```
 [PASS] Claude Code produced output
 [PROOF] Output saved to: ./tests/claude-output-image.txt
 [INFO] Checking for resized image in /tmp/...
@@ -182,66 +207,57 @@ TEST 2: PostToolUse Hook (Cache Keepalive)
 [PROOF] Cache keepalive output:
   {"cache_keepalive": "1705312202"}
 
-TEST 3: Combined Workflow
+### Failure Case (Config Issues)
+
+```
+🔒 PRIVACY CONFIGURATION
 ==========================
-[INFO] Testing multiple operations to verify hooks fire consistently...
-[INFO] Operation 1: Read text file
-[INFO] Running: Read text file
-[INFO] Command: echo 'Read /path/to/test-doc.txt' | claude -p
-[PASS] PostToolUse fired for this operation
-...
+[✗ FAIL] DISABLE_TELEMETRY not set (expected: 1, got: )
+[INFO] Add to ~/.bashrc or ~/.zshrc: export DISABLE_TELEMETRY=1
+[✗ FAIL] CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC not set (expected: 1, got: )
+[METRIC] Privacy Score: 0/5
+[✗ FAIL] Privacy not configured - follow suggestions above
+
+⚙️  AUTO-COMPACT CONFIGURATION
+============================
+[✗ FAIL] Claude config not found: ~/.claude/.claude.json
+[INFO] Run optimize-claude.sh to create this file
+
+🪝 HOOK CONFIGURATION
+=====================
+[✗ FAIL] PreToolUse hook not configured
+[INFO] This hook auto-resizes images before Claude processes them
+[✗ FAIL] PostToolUse hook not configured
+[INFO] This hook keeps the prompt cache warm (saves 90% on cache misses)
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- HOOK VALIDATION REPORT
+ 📊 VALIDATION SUMMARY
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Test Results:
-  Tests Passed: 8
-  Tests Failed: 0
+Test Results: Passed: 2 | Failed: 6 | Skipped: 1
 
-Hook Execution Summary:
+[✗ FAIL] CONFIGURATION INCOMPLETE
 
-PreToolUse Hook (Image Processing):
-  ✓ FIRED - Hook automatically resized image
-  Evidence: /tmp/resized_test-image.png exists
-
-PostToolUse Hook (Cache Keepalive):
-  ✓ FIRED - Hook output cache_keepalive
-  Evidence: cache_keepalive found in Claude output
-
-Overall Verdict:
-ALL HOOKS ARE WORKING
-
-Both PreToolUse and PostToolUse hooks are firing automatically
-when Claude Code processes files. The optimizations are active!
+Some optimizations are not configured.
+Review the errors above and run optimize-claude.sh to fix.
 ```
 
-### Failure Case
+### Failure Case (Headless Test)
 
 ```
-TEST 1: PreToolUse Hook (Image Processing)
-=========================================
-...
-[INFO] Checking for resized image in /tmp/...
-[FAIL] PreToolUse hook did NOT fire - no resized image found
-[INFO] Expected: /tmp/resized_*.png
-[INFO] This means the hook didn't trigger when reading the image
+🧪 HEADLESS HOOK TESTING
+=========================
+[INFO] Running headless hook test (costs ~$0.01-0.02 in API credits)...
+[INFO] Executing: Read /path/to/test-image.png
+[✗ FAIL] PreToolUse hook did NOT fire - no resized image found
+[✗ FAIL] PostToolUse hook did NOT fire - no cache_keepalive in output
+[⚠ SKIP] Resized image not found (hook may have run but output path differs)
+```
 
-TEST 2: PostToolUse Hook (Cache Keepalive)
-===========================================
-...
-[INFO] Checking for cache_keepalive in Claude's output...
-[FAIL] PostToolUse hook did NOT fire - no cache_keepalive in output
-[INFO] Expected: JSON with cache_keepalive field
-
-Overall Verdict:
-HOOKS NOT FIRING
-
-The hooks are not triggering automatically. Possible causes:
+**Possible causes:**
   • Claude Code wasn't restarted after installing hooks
   • Hooks aren't configured correctly in settings.json
   • Claude Code version doesn't support hooks
-```
 
 ## Command Line Options
 
@@ -261,27 +277,17 @@ Useful for debugging failures.
 
 **Windows:**
 ```powershell
-.\scripts\windows\validate.ps1 -Detailed
+.\scripts\windows\validate.ps1 -VerboseOutput
 ```
-
-### `--keep` / `-Keep`
-
-Preserves test files and results:
-- `.validation-test/` → `tests/` - Test files
-- `.validation-results/` → `tests/` - Claude output files
-
-Allows manual inspection after the test.
 
 ## Artifacts
 
-When using `--keep` / `-Keep`:
+When running validation, temporary files are created in:
 
 | Location | Contents |
 |----------|----------|
 | `tests/` | test-image.png, test-doc.txt |
-| `tests/claude-output-image.txt` | Claude output from Read command |
-| `tests/claude-output-ls.txt` | Claude output from ls command |
-| `tests/claude-output-*.txt` | Other command outputs |
+| `/tmp/` (Linux/macOS) or `$env:TEMP` (Windows) | Claude output files |
 
 ## Exit Codes
 
@@ -366,15 +372,17 @@ The exit code indicates success/failure:
 - Exit 0 = hooks working
 - Exit 1 = hooks not firing
 
-## Comparison with Other Validation Methods
+## Comparison of Validation Modes
 
-| Method | Automation | Proof | Use Case |
-|--------|-----------|-------|----------|
-| `validate.sh` | ✓ Config only | Settings exist | Quick check |
-| `validate.sh` | ✓ **Full** | **Actual proof** | **Automated validation** |
+| Mode | Flag | Description |
+|------|------|-------------|
+| Config-only | (default) | Checks that hooks are configured in settings.json |
+| With headless tests | `--test-hooks` | Actually runs Claude Code to verify hooks fire |
 
-The headless validation is the only method that:
+The headless validation (`--test-hooks`) is the only method that:
 - Runs Claude Code automatically
 - Triggers hooks without user interaction
 - Provides concrete proof hooks fired
 - Can be used in CI/CD pipelines
+
+Note: `--test-hooks` requires `jq` to be installed and uses API credits (~$0.01-0.02 per test).

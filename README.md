@@ -33,6 +33,7 @@ This repository documents **obscure, undocumented, and internal** aspects of Cla
 |----------|-------------|
 | [Optimization Scripts](docs/optimization-scripts.md) | Automated setup scripts for token efficiency and privacy configuration |
 | [Validation](docs/validation.md) | Functional testing to verify hooks work correctly |
+| [Legal Notice](docs/LEGAL.md) | Legal disclaimer and copyright notice |
 
 **Tested Environments:**
 - Windows: PowerShell 7.6.0
@@ -46,22 +47,22 @@ This repository documents **obscure, undocumented, and internal** aspects of Cla
 claude-code-optimizer/
 ├── docs/                          # Documentation
 │   ├── query-flow.md              # API streaming internals
-│   ├── session-memory.md            # Memory & compaction
-│   ├── tool-system.md               # Tool framework internals
-│   ├── permission-system.md         # Auto-mode classifier
-│   ├── skill-plugin-system.md       # Skills & plugins
-│   ├── prompt-caching.md            # Cache TTL & keepalive strategies
-│   ├── undocumented-features.md     # Feature flags & hidden commands
-│   ├── ant-only-commands.md         # Internal commands
-│   ├── telemetry-privacy.md         # Telemetry internals
-│   ├── optimization-scripts.md      # Setup automation guide
-│   ├── validation.md                # Verification testing framework
-│   └── LEGAL.md                     # Legal information
+│   ├── session-memory.md          # Memory & compaction
+│   ├── tool-system.md             # Tool framework internals
+│   ├── permission-system.md       # Auto-mode classifier
+│   ├── skill-plugin-system.md     # Skills & plugins
+│   ├── prompt-caching.md          # Cache TTL & keepalive strategies
+│   ├── undocumented-features.md   # Feature flags & hidden commands
+│   ├── ant-only-commands.md       # Internal commands
+│   ├── telemetry-privacy.md       # Telemetry internals
+│   ├── optimization-scripts.md    # Setup automation guide
+│   ├── validation.md              # Verification testing framework
+│   └── LEGAL.md                   # Legal information
 ├── scripts/                       # Automation scripts
-│   ├── linux/                       # Bash scripts
+│   ├── linux/                     # Bash scripts
 │   │   ├── optimize-claude.sh
 │   │   └── validate.sh
-│   └── windows/                     # PowerShell scripts
+│   └── windows/                   # PowerShell scripts
 │       ├── optimize-claude.ps1
 │       └── validate.ps1
 ├── tests/                         # Test files
