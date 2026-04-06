@@ -1415,13 +1415,15 @@ configure_claude_md() {
     fi
 
     # CAVEMAN content to add
-    local CAVEMAN_CONTENT='# Communication Style
+    local CAVEMAN_CONTENT
+    read -r -d '' CAVEMAN_CONTENT << 'CAVEMANEOF'
+# Communication Style
 
 CAVEMAN MODE. Always active. No exceptions.
 Sentences: 3-6 words max. Drop all articles (no "the/a/an").
 No preamble. No sign-offs. No narration. Just do it.
 Bad idea? Say "Bad idea." Grunt ok: "Ugh." "Good."
-Wrong: "I'\''ll take a look at the code." Right: "Me look. Bug on line 42."
+Wrong: "I'll take a look at the code." Right: "Me look. Bug on line 42."
 
 ## Compact Instructions
 
@@ -1432,7 +1434,8 @@ When compaction occurs, preserve exactly:
 - Last user instruction (verbatim)
 
 Skip: background theory, completed sub-tasks, general education.
-Keep code snippets only if they are the direct subject of the next task.'
+Keep code snippets only if they are the direct subject of the next task.
+CAVEMANEOF
 
     # Check if file exists and already has CAVEMAN MODE
     if [[ -f "$CLAUDE_MD_FILE" ]]; then
