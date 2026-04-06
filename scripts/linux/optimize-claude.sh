@@ -29,6 +29,7 @@ SKIP_DEPS=false
 VERIFY_ONLY=false
 AUTO_APPROVE=false
 AUTO_FORMAT=false
+CAVEMAN=false
 
 # Dependency tracking
 MISSING_DEPS=()
@@ -87,6 +88,7 @@ OPTIONS:
     --reduced-privacy Use reduced privacy (telemetry disabled only, keeps auto-updates)
     --auto-approve    Enable auto-approval for safe read-only commands (opt-in)
     --auto-format     Enable auto-formatting after file edits (opt-in)
+    --caveman         Enable CAVEMAN mode (concise system prompt for token savings)
     --dry-run         Show what would be done without making changes
     --skip-deps       Skip dependency installation
     --verify          Verify current environment variable configuration
@@ -97,6 +99,7 @@ EXAMPLES:
     $0 --reduced-privacy  # Reduced privacy (standard telemetry disabled)
     $0 --auto-approve     # Enable auto-approval for safe commands
     $0 --auto-format      # Enable auto-formatting after edits
+    $0 --caveman          # Enable CAVEMAN concise prompt mode
     $0 --dry-run          # Preview changes
     $0 --verify           # Check current env var configuration
 
@@ -124,6 +127,10 @@ parse_args() {
                 ;;
             --auto-format)
                 AUTO_FORMAT=true
+                shift
+                ;;
+            --caveman)
+                CAVEMAN=true
                 shift
                 ;;
             --dry-run)
@@ -1315,6 +1322,7 @@ HOOKEOF
     # Create settings.json with hook references
     local AUTO_APPROVE_HOOK=""
     local AUTO_FORMAT_HOOK=""
+    local CAVEMAN_JSON=""
 
     if $AUTO_APPROVE; then
         AUTO_APPROVE_HOOK='      {
@@ -1327,6 +1335,10 @@ HOOKEOF
       },'
     fi
 
+    if $CAVEMAN; then
+        CAVEMAN_JSON='  "appendSystemPrompt": "CAVEMAN: Strip articles, helping verbs, filler. Keep nouns, main verbs, adjectives, numbers. Raw content only.",'"$'\n''
+    fi
+
     cat > "$SETTINGS_FILE" << EOF
 {
   "\$schema": "https://json.schemastore.org/claude-code-settings.json",
@@ -1335,7 +1347,7 @@ HOOKEOF
     "commit": "",
     "pr": ""
   },
-  "hooks": {
+${CAVEMAN_JSON}  "hooks": {
     "PreToolUse": [
       {
         "matcher": "Read",
@@ -1371,6 +1383,7 @@ EOF
     if $AUTO_APPROVE; then HOOK_STATUS+=", auto-approve"; fi
     HOOK_STATUS+=", Write/Bash), PostToolUse"
     if $AUTO_FORMAT; then HOOK_STATUS+=", auto-format"; fi
+    if $CAVEMAN; then HOOK_STATUS+=", CAVEMAN mode"; fi
     print_status "$HOOK_STATUS"
 }
 
@@ -1501,6 +1514,7 @@ main() {
     local SUMMARY_HOOKS="Auto-compact, image pre-processing, cache keepalive, no-attribution"
     if $AUTO_APPROVE; then SUMMARY_HOOKS+=", auto-approve"; fi
     if $AUTO_FORMAT; then SUMMARY_HOOKS+=", auto-format"; fi
+    if $CAVEMAN; then SUMMARY_HOOKS+=", caveman"; fi
     echo -e "${BOLD}Hooks configured:${NC} $SUMMARY_HOOKS"
     echo ""
 

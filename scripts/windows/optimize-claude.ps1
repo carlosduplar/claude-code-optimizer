@@ -41,6 +41,9 @@
 .PARAMETER AutoFormat
     Enable auto-formatting after file edits (opt-in)
 
+.PARAMETER Caveman
+    Enable CAVEMAN mode (concise system prompt for token savings)
+
 .EXAMPLE
     .\optimize-claude.ps1
     Full privacy mode (default) with dependency installation
@@ -54,8 +57,8 @@
     Preview changes without applying them
 
 .EXAMPLE
-    .\optimize-claude.ps1 -Experimental -AutoApprove
-    Include experimental features and auto-approve safe commands
+    .\optimize-claude.ps1 -Caveman
+    Enable CAVEMAN concise prompt mode for maximum token savings
 #>
 
 [CmdletBinding()]
@@ -69,7 +72,8 @@ param(
     [switch]$NoNotify,
     [switch]$NoContextRefresh,
     [switch]$AutoApprove,
-    [switch]$AutoFormat
+    [switch]$AutoFormat,
+    [switch]$Caveman
 )
 
 $Colors = @{
@@ -426,6 +430,10 @@ function Set-ClaudeSettings {
         }
         env = $envVars
         hooks = $hooks
+    }
+
+    if ($Caveman) {
+        $settings['appendSystemPrompt'] = "CAVEMAN: Strip articles, helping verbs, filler. Keep nouns, main verbs, adjectives, numbers. Raw content only."
     }
 
     if ($DryRun) {

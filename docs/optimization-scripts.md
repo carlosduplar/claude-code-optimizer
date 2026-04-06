@@ -209,6 +209,40 @@ Configure empty attribution strings in `settings.json` to hide the "Co-authored 
 
 This removes the default Claude Code attribution signature from git commits and pull request descriptions, reducing token usage on every commit or PR created through Claude Code.
 
+### 5. CAVEMAN Mode (Optional)
+
+Enable CAVEMAN mode by adding `--caveman` (Bash) or `-Caveman` (PowerShell) to configure a concise system prompt extension:
+
+```bash
+./scripts/linux/optimize-claude.sh --caveman
+```
+
+```powershell
+.\scripts\windows\optimize-claude.ps1 -Caveman
+```
+
+**What it does:**
+
+Adds an `appendSystemPrompt` field to `settings.json` that instructs Claude to use minimal language:
+
+```json
+{
+  "appendSystemPrompt": "CAVEMAN: Strip articles, helping verbs, filler. Keep nouns, main verbs, adjectives, numbers. Raw content only."
+}
+```
+
+**Effect:**
+- Claude outputs more concise responses
+- Articles (the, a, an) are stripped
+- Helping verbs (is, are, was, were) are minimized
+- Raw technical content is preserved
+- Reduces token consumption in both directions
+
+**When to use:**
+- Technical tasks where brevity is preferred
+- Environments with strict token budgets
+- Users who prefer direct, no-fluff responses
+
 ## Command Line Options
 
 ### Bash Script (`optimize-claude.sh`)
@@ -216,6 +250,9 @@ This removes the default Claude Code attribution signature from git commits and 
 | Option | Description |
 |--------|-------------|
 | `--reduced-privacy` | Standard privacy only (keeps auto-updates) |
+| `--auto-approve` | Enable auto-approval whitelist for safe commands (opt-in) |
+| `--auto-format` | Enable auto-formatting after file edits (opt-in) |
+| `--caveman` | Enable CAVEMAN mode (concise system prompt for token savings) |
 | `--dry-run` | Preview changes without applying |
 | `--skip-deps` | Skip dependency installation |
 | `--help` | Show help message |
@@ -229,6 +266,15 @@ This removes the default Claude Code attribution signature from git commits and 
 # Reduced privacy (standard telemetry only)
 ./scripts/linux/optimize-claude.sh --reduced-privacy
 
+# Enable auto-approval for safe commands
+./scripts/linux/optimize-claude.sh --auto-approve
+
+# Enable auto-formatting after edits
+./scripts/linux/optimize-claude.sh --auto-format
+
+# Enable CAVEMAN concise prompt mode
+./scripts/linux/optimize-claude.sh --caveman
+
 # Preview what would be done
 ./scripts/linux/optimize-claude.sh --dry-run
 
@@ -241,6 +287,9 @@ This removes the default Claude Code attribution signature from git commits and 
 | Parameter | Description |
 |-----------|-------------|
 | `-ReducedPrivacy` | Standard privacy only (keeps auto-updates) |
+| `-AutoApprove` | Enable auto-approval whitelist for safe commands (opt-in) |
+| `-AutoFormat` | Enable auto-formatting after file edits (opt-in) |
+| `-Caveman` | Enable CAVEMAN mode (concise system prompt for token savings) |
 | `-DryRun` | Preview changes without applying |
 | `-SkipDeps` | Skip dependency installation |
 
@@ -252,6 +301,15 @@ This removes the default Claude Code attribution signature from git commits and 
 
 # Reduced privacy
 .\scripts\windows\optimize-claude.ps1 -ReducedPrivacy
+
+# Enable auto-approval for safe commands
+.\scripts\windows\optimize-claude.ps1 -AutoApprove
+
+# Enable auto-formatting after edits
+.\scripts\windows\optimize-claude.ps1 -AutoFormat
+
+# Enable CAVEMAN concise prompt mode
+.\scripts\windows\optimize-claude.ps1 -Caveman
 
 # Preview only
 .\scripts\windows\optimize-claude.ps1 -DryRun
