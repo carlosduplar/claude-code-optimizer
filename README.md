@@ -137,6 +137,18 @@ Notable undocumented variables:
 | `ENABLE_PID_BASED_VERSION_LOCKING` | PID-based update locking |
 | `CLAUDE_CODE_COWORKER_TYPE` | Coworker type for telemetry |
 
+**Optimization variables (set by optimizer scripts):**
+
+| Variable | Purpose | Token Savings |
+|----------|---------|---------------|
+| `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1` | Disable automatic memory extraction | ~5-10% |
+| `ENABLE_CLAUDE_CODE_SM_COMPACT=true` | Enable session-memory compaction | ~10-20% |
+| `DISABLE_INTERLEAVED_THINKING=true` | Disable interleaved thinking | ~5-15% |
+| `CLAUDE_CODE_DISABLE_ADVISOR_TOOL=true` | Disable advisor tool | ~3-5% |
+| `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=true` | Disable git instructions | ~2-3% |
+| `CLAUDE_CODE_DISABLE_POLICY_SKILLS=true` | Disable policy skills | ~2-3% |
+| `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80` | Compact at 80% of context window | Prevents rate limits |
+
 See [docs/undocumented-features.md](docs/undocumented-features.md) for the full list.
 
 ---

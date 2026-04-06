@@ -201,6 +201,63 @@ check_privacy() {
     fi
 }
 
+# Test 3b: Check optimization variables
+check_optimization_vars() {
+    print_section "⚡ OPTIMIZATION VARIABLES"
+
+    local opt_score=0
+    local opt_vars=(
+        "CLAUDE_CODE_DISABLE_AUTO_MEMORY:1:Disable auto-memory extraction"
+        "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:80:Compact at 80% threshold"
+    )
+
+    for var_info in "${opt_vars[@]}"; do
+        IFS=':' read -r var_name expected description <<< "$var_info"
+        local actual="${!var_name}"
+
+        if [[ "$actual" == "$expected" ]]; then
+            print_success "$var_name=$actual ($description)"
+            ((opt_score++))
+        else
+            print_error "$var_name not set correctly (expected: $expected, got: ${actual:-'(empty)'})"
+            print_status "Add to ~/.bashrc or ~/.zshrc: export $var_name=$expected"
+        fi
+    done
+
+    # Check optional boolean vars (true/1 both acceptable)
+    local bool_vars=(
+        "ENABLE_CLAUDE_CODE_SM_COMPACT:true:Session-memory compaction"
+        "DISABLE_INTERLEAVED_THINKING:true:Disable interleaved thinking"
+        "CLAUDE_CODE_DISABLE_ADVISOR_TOOL:true:Disable advisor tool"
+        "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS:true:Disable git instructions"
+        "CLAUDE_CODE_DISABLE_POLICY_SKILLS:true:Disable policy skills"
+    )
+
+    for var_info in "${bool_vars[@]}"; do
+        IFS=':' read -r var_name expected description <<< "$var_info"
+        local actual="${!var_name}"
+
+        if [[ "$actual" == "true" || "$actual" == "1" ]]; then
+            print_success "$var_name=$actual ($description)"
+            ((opt_score++))
+        else
+            print_error "$var_name not set (expected: true/1, got: ${actual:-'(empty)'})"
+            print_status "Add to ~/.bashrc or ~/.zshrc: export $var_name=true"
+        fi
+    done
+
+    echo ""
+    print_metric "Optimization Score: $opt_score/7"
+
+    if [[ $opt_score -eq 7 ]]; then
+        print_success "All optimizations configured ✓"
+    elif [[ $opt_score -ge 4 ]]; then
+        print_warning "Partial optimizations ($opt_score/7) - some token savings active"
+    else
+        print_error "Optimizations not configured - follow suggestions above"
+    fi
+}
+
 # Test 4: Check auto-compact configuration
 check_auto_compact() {
     print_section "⚙️  AUTO-COMPACT CONFIGURATION"
@@ -482,6 +539,7 @@ main() {
     check_claude
     check_dependencies
     check_privacy
+    check_optimization_vars
     check_auto_compact
     check_hooks
     test_hooks_headless

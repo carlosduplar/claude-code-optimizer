@@ -248,6 +248,59 @@ function Test-PrivacyConfiguration {
     }
 }
 
+# Test 3b: Check optimization variables
+function Test-OptimizationVariables {
+    Write-Section "⚡ OPTIMIZATION VARIABLES"
+
+    $optScore = 0
+    $vars = @(
+        @{ Name = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"; Expected = "1"; Description = "Disable auto-memory extraction" },
+        @{ Name = "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"; Expected = "80"; Description = "Compact at 80% threshold" }
+    )
+
+    foreach ($var in $vars) {
+        $actual = [Environment]::GetEnvironmentVariable($var.Name, "User")
+        if ($actual -eq $var.Expected) {
+            Write-Success "$($var.Name)=$actual ($($var.Description))"
+            $optScore++
+        } else {
+            Write-Error "$($var.Name) not set (expected: $($var.Expected), got: $actual)"
+            Write-Status "Set in PowerShell: [Environment]::SetEnvironmentVariable('$($var.Name)', '$($var.Expected)', 'User')"
+        }
+    }
+
+    # Boolean vars (true/1 both acceptable)
+    $boolVars = @(
+        @{ Name = "ENABLE_CLAUDE_CODE_SM_COMPACT"; Description = "Session-memory compaction" },
+        @{ Name = "DISABLE_INTERLEAVED_THINKING"; Description = "Disable interleaved thinking" },
+        @{ Name = "CLAUDE_CODE_DISABLE_ADVISOR_TOOL"; Description = "Disable advisor tool" },
+        @{ Name = "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS"; Description = "Disable git instructions" },
+        @{ Name = "CLAUDE_CODE_DISABLE_POLICY_SKILLS"; Description = "Disable policy skills" }
+    )
+
+    foreach ($var in $boolVars) {
+        $actual = [Environment]::GetEnvironmentVariable($var.Name, "User")
+        if ($actual -eq "true" -or $actual -eq "1") {
+            Write-Success "$($var.Name)=$actual ($($var.Description))"
+            $optScore++
+        } else {
+            Write-Error "$($var.Name) not set (expected: true/1, got: $actual)"
+            Write-Status "Set in PowerShell: [Environment]::SetEnvironmentVariable('$($var.Name)', 'true', 'User')"
+        }
+    }
+
+    Write-Host ""
+    Write-Metric "Optimization Score: $optScore/7"
+
+    if ($optScore -eq 7) {
+        Write-Success "All optimizations configured ✓"
+    } elseif ($optScore -ge 4) {
+        Write-Warning "Partial optimizations ($optScore/7) - some token savings active"
+    } else {
+        Write-Error "Optimizations not configured - follow suggestions above"
+    }
+}
+
 # Test 4: Check auto-compact configuration
 function Test-AutoCompact {
     Write-Section "⚙️  AUTO-COMPACT CONFIGURATION"
@@ -562,6 +615,7 @@ Write-Header "Claude Code Optimizer - Configuration Validation"
 Test-ClaudeInstallation
 Test-Dependencies
 Test-PrivacyConfiguration
+Test-OptimizationVariables
 Test-AutoCompact
 Test-HookConfiguration
 Test-HooksHeadless

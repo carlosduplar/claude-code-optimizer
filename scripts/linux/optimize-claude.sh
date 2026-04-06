@@ -46,11 +46,14 @@ export_env_vars() {
     export BASH_MAX_OUTPUT_LENGTH=10000
     export DISABLE_TELEMETRY=1
     export CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000
-    export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=70
+    export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80
     export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
-    if $FULL_PRIVACY; then
-        export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
-    fi
+    export ENABLE_CLAUDE_CODE_SM_COMPACT=true
+    export DISABLE_INTERLEAVED_THINKING=true
+    export CLAUDE_CODE_DISABLE_ADVISOR_TOOL=true
+    export CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=true
+    export CLAUDE_CODE_DISABLE_POLICY_SKILLS=true
+    export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
     print_success "Environment variables exported to current shell"
 }
 
@@ -670,13 +673,18 @@ configure_privacy() {
 export DISABLE_TELEMETRY=1
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1
 export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+export ENABLE_CLAUDE_CODE_SM_COMPACT=true
+export DISABLE_INTERLEAVED_THINKING=true
+export CLAUDE_CODE_DISABLE_ADVISOR_TOOL=true
+export CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=true
+export CLAUDE_CODE_DISABLE_POLICY_SKILLS=true
 export OTEL_LOG_USER_PROMPTS=0
 export OTEL_LOG_TOOL_DETAILS=0
 
 # Claude Code Token Optimization
 export BASH_MAX_OUTPUT_LENGTH=10000
 export CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000
-export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=70
+export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80
 $BLOCK_END"
         print_status "Configuring MAXIMUM privacy mode"
     else
@@ -684,11 +692,16 @@ $BLOCK_END"
 # Claude Code Privacy Settings
 export DISABLE_TELEMETRY=1
 export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
+export ENABLE_CLAUDE_CODE_SM_COMPACT=true
+export DISABLE_INTERLEAVED_THINKING=true
+export CLAUDE_CODE_DISABLE_ADVISOR_TOOL=true
+export CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=true
+export CLAUDE_CODE_DISABLE_POLICY_SKILLS=true
 
 # Claude Code Token Optimization
 export BASH_MAX_OUTPUT_LENGTH=10000
 export CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000
-export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=70
+export CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80
 $BLOCK_END"
         print_status "Configuring standard privacy mode"
     fi
@@ -1408,7 +1421,18 @@ CAVEMAN MODE. Always active. No exceptions.
 Sentences: 3-6 words max. Drop all articles (no "the/a/an").
 No preamble. No sign-offs. No narration. Just do it.
 Bad idea? Say "Bad idea." Grunt ok: "Ugh." "Good."
-Wrong: "I'\''ll take a look at the code." Right: "Me look. Bug on line 42."'
+Wrong: "I'\''ll take a look at the code." Right: "Me look. Bug on line 42."
+
+## Compact Instructions
+
+When compaction occurs, preserve exactly:
+- Current task state (what we're doing)
+- File paths changed (with line numbers if editing)
+- Pending errors (verbatim, if unresolved)
+- Last user instruction (verbatim)
+
+Skip: background theory, completed sub-tasks, general education.
+Keep code snippets only if they are the direct subject of the next task.'
 
     # Check if file exists and already has CAVEMAN MODE
     if [[ -f "$CLAUDE_MD_FILE" ]]; then
@@ -1434,6 +1458,17 @@ Sentences: 3-6 words max. Drop all articles (no "the/a/an").
 No preamble. No sign-offs. No narration. Just do it.
 Bad idea? Say "Bad idea." Grunt ok: "Ugh." "Good."
 Wrong: "I'll take a look at the code." Right: "Me look. Bug on line 42."
+
+## Compact Instructions
+
+When compaction occurs, preserve exactly:
+- Current task state (what we're doing)
+- File paths changed (with line numbers if editing)
+- Pending errors (verbatim, if unresolved)
+- Last user instruction (verbatim)
+
+Skip: background theory, completed sub-tasks, general education.
+Keep code snippets only if they are the direct subject of the next task.
 EOF
         fi
         print_success "Created CLAUDE.md with CAVEMAN MODE"
@@ -1494,6 +1529,11 @@ verify_env_vars() {
     echo "  CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=${CLAUDE_AUTOCOMPACT_PCT_OVERRIDE:-<not set>}"
     echo "  CLAUDE_CODE_DISABLE_AUTO_MEMORY=${CLAUDE_CODE_DISABLE_AUTO_MEMORY:-<not set>}"
     echo "  CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=${CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC:-<not set>}"
+    echo "  ENABLE_CLAUDE_CODE_SM_COMPACT=${ENABLE_CLAUDE_CODE_SM_COMPACT:-<not set>}"
+    echo "  DISABLE_INTERLEAVED_THINKING=${DISABLE_INTERLEAVED_THINKING:-<not set>}"
+    echo "  CLAUDE_CODE_DISABLE_ADVISOR_TOOL=${CLAUDE_CODE_DISABLE_ADVISOR_TOOL:-<not set>}"
+    echo "  CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=${CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS:-<not set>}"
+    echo "  CLAUDE_CODE_DISABLE_POLICY_SKILLS=${CLAUDE_CODE_DISABLE_POLICY_SKILLS:-<not set>}"
 
     echo ""
     print_status "To apply environment variables to your current shell, run:"

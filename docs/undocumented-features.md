@@ -509,6 +509,7 @@ flowchart TB
 | `CLAUDE_CODE_EXTRA_BODY` | Extra JSON body params | `'{"key": "value"}'` |
 | `CLAUDE_CODE_EXTRA_METADATA` | Extra metadata | `'{"source": "ci"}'` |
 | `API_TIMEOUT_MS` | API timeout in milliseconds | `600000` (10 min) |
+| `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | Override auto-compact threshold percentage | `80` (compact at 80% of context window) |
 
 ---
 

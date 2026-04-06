@@ -177,7 +177,32 @@ If you want to keep auto-updates and release notes:
 
 This only sets `DISABLE_TELEMETRY=1`, keeping other features enabled.
 
-### 3. Auto-Compact Configuration
+### 3. Token Optimization Variables
+
+Both scripts configure additional environment variables to reduce token usage:
+
+```bash
+# Set in shell profile (Linux/macOS) or Registry (Windows)
+CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80      # Compact at 80% of context window
+CLAUDE_CODE_DISABLE_AUTO_MEMORY=1         # Disable automatic memory extraction
+ENABLE_CLAUDE_CODE_SM_COMPACT=true        # Enable session-memory compaction
+DISABLE_INTERLEAVED_THINKING=true         # Disable interleaved thinking
+CLAUDE_CODE_DISABLE_ADVISOR_TOOL=true     # Disable advisor tool
+CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=true # Disable git instructions
+CLAUDE_CODE_DISABLE_POLICY_SKILLS=true    # Disable policy skills
+```
+
+**Estimated token savings:**
+| Variable | Savings |
+|----------|---------|
+| `CLAUDE_CODE_DISABLE_AUTO_MEMORY` | ~5-10% |
+| `ENABLE_CLAUDE_CODE_SM_COMPACT` | ~10-20% |
+| `DISABLE_INTERLEAVED_THINKING` | ~5-15% |
+| `CLAUDE_CODE_DISABLE_ADVISOR_TOOL` | ~3-5% |
+| `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS` | ~2-3% |
+| `CLAUDE_CODE_DISABLE_POLICY_SKILLS` | ~2-3% |
+
+### 4. Auto-Compact Configuration
 
 Both scripts enable `autoCompactEnabled` in Claude's settings:
 
@@ -191,7 +216,7 @@ Both scripts enable `autoCompactEnabled` in Claude's settings:
 - Prevents expensive blocking rate limits
 - Preserves recent context (unlike `/clear`)
 
-### 4. Remove Attribution Text
+### 5. Remove Attribution Text
 
 Configure empty attribution strings in `settings.json` to hide the "Co-authored by" attribution on commits and PRs:
 
@@ -209,7 +234,7 @@ Configure empty attribution strings in `settings.json` to hide the "Co-authored 
 
 This removes the default Claude Code attribution signature from git commits and pull request descriptions, reducing token usage on every commit or PR created through Claude Code.
 
-### 5. CAVEMAN Mode (Optional)
+### 6. CAVEMAN Mode (Optional)
 
 Enable CAVEMAN mode by adding `--caveman` (Bash) or `-Caveman` (PowerShell) to add a concise communication directive to your CLAUDE.md:
 
