@@ -33,6 +33,7 @@ This repository documents **obscure, undocumented, and internal** aspects of Cla
 |----------|-------------|
 | [Optimization Scripts](docs/optimization-scripts.md) | Automated setup scripts for token efficiency and privacy configuration |
 | [Validation](docs/validation.md) | Functional testing to verify hooks work correctly |
+| [Token Benchmark](tests/benchmark/README.md) | Token measurement test suite for optimization validation |
 | [Legal Notice](docs/LEGAL.md) | Legal disclaimer and copyright notice |
 
 **Tested Environments:**
@@ -66,6 +67,19 @@ claude-code-optimizer/
 │       ├── optimize-claude.ps1
 │       └── validate.ps1
 ├── tests/                         # Test files
+│   ├── benchmark/                 # Token measurement benchmark suite
+│   │   ├── corpus/                # Test project files (Python, PDF, PNG)
+│   │   ├── results/               # Benchmark output directory
+│   │   ├── prompts.txt            # Fixed test prompt sequence
+│   │   ├── parse-session.sh       # Transcript parser (bash)
+│   │   ├── parse-session.ps1      # Transcript parser (PowerShell)
+│   │   ├── run-config.sh          # Single config runner (bash)
+│   │   ├── run-config.ps1         # Single config runner (PowerShell)
+│   │   ├── run-all.sh             # Full A/B/C/D benchmark (bash)
+│   │   ├── run-all.ps1            # Full A/B/C/D benchmark (PowerShell)
+│   │   ├── report.sh              # Results comparison (bash)
+│   │   ├── report.ps1             # Results comparison (PowerShell)
+│   │   └── README.md              # Benchmark usage guide
 │   ├── test-image.png
 │   └── test-document.pdf
 ├── README.md                      # This file
