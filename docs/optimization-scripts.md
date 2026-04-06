@@ -211,7 +211,7 @@ This removes the default Claude Code attribution signature from git commits and 
 
 ### 5. CAVEMAN Mode (Optional)
 
-Enable CAVEMAN mode by adding `--caveman` (Bash) or `-Caveman` (PowerShell) to configure a concise system prompt extension:
+Enable CAVEMAN mode by adding `--caveman` (Bash) or `-Caveman` (PowerShell) to add a concise communication directive to your CLAUDE.md:
 
 ```bash
 ./scripts/linux/optimize-claude.sh --caveman
@@ -223,22 +223,36 @@ Enable CAVEMAN mode by adding `--caveman` (Bash) or `-Caveman` (PowerShell) to c
 
 **What it does:**
 
-Adds an `appendSystemPrompt` field to `settings.json` that targets common verbosity patterns:
+Adds a `Communication Style` section to `~/.claude/CLAUDE.md` (or appends to existing file):
 
-```json
-{
-  "appendSystemPrompt": "NO PREAMBLE. No 'Sure!', 'Great question!', 'Happy to help!'. Start with answer. NO SIGN-OFFS. No 'Let me know...', 'Hope this helps!', 'Feel free to ask...'. End when done. NO PROCESS NARRATION. Don't explain what you're about to do. Do it. Show result. NO FILLER. Drop 'just', 'basically', 'actually', 'simply', 'really', 'very'. SHORT SENTENCES. Break long sentences. 10 words max."
-}
+```markdown
+# Communication Style
+
+CAVEMAN MODE. Always active. No exceptions.
+Sentences: 3-6 words max. Drop all articles (no "the/a/an").
+No preamble. No sign-offs. No narration. Just do it.
+Bad idea? Say "Bad idea." Grunt ok: "Ugh." "Good."
+Wrong: "I'll take a look at the code." Right: "Me look. Bug on line 42."
 ```
 
 **Effect:**
+
 - Eliminates conversational padding ("Sure!", "Great question!")
 - Removes sign-offs ("Let me know if...", "Hope this helps!")
 - Stops process narration ("I'm going to...", "First I'll...")
 - Cuts filler words while keeping technical precision
 - Technical content stays complete and accurate
+- Uses CLAUDE.md (project-level) instead of `appendSystemPrompt` (global)
+
+**Advantages over `appendSystemPrompt`:**
+
+- **Per-project control** - Each project can have different communication preferences
+- **Cleaner settings.json** - No long prompt strings in global config
+- **Standard Claude mechanism** - Uses official CLAUDE.md support
+- **Easier to edit** - Just edit the markdown file, no JSON escaping
 
 **When to use:**
+
 - Technical tasks where brevity is preferred
 - Environments with strict token budgets
 - Users who prefer direct, no-fluff responses
@@ -478,6 +492,7 @@ Claude Code reads environment variables at startup. **You must restart Claude Co
 | `%USERPROFILE%\.claude\.claude.json` | Windows | Claude settings (auto-compact) |
 | `~/.claude/settings.json` | Linux/macOS | Hooks for auto-processing & keepalive |
 | `.claude/settings.json` | Windows (project) | Hooks for auto-processing & keepalive |
+| `~/.claude/CLAUDE.md` | All | Global instructions (CAVEMAN mode, conventions) |
 | `~/.bashrc` / `~/.zshrc` modifications | Linux/macOS | Environment variables |
 | Windows Registry | Windows | System environment variables |
 

@@ -1322,7 +1322,6 @@ HOOKEOF
     # Create settings.json with hook references
     local AUTO_APPROVE_HOOK=""
     local AUTO_FORMAT_HOOK=""
-    local CAVEMAN_JSON=""
 
     if $AUTO_APPROVE; then
         AUTO_APPROVE_HOOK='      {
@@ -1335,10 +1334,6 @@ HOOKEOF
       },'
     fi
 
-    if $CAVEMAN; then
-        CAVEMAN_JSON='  "appendSystemPrompt": "NO PREAMBLE. No '"'"'Sure!'"'"', '"'"'Great question!'"'"', '"'"'Happy to help!'"'"'. Start with answer. NO SIGN-OFFS. No '"'"'Let me know...'"'"', '"'"'Hope this helps!'"'"', '"'"'Feel free to ask...'"'"'. End when done. NO PROCESS NARRATION. Don'"'"'t explain what you'"'"'re about to do. Do it. Show result. NO FILLER. Drop '"'"'just'"'"', '"'"'basically'"'"', '"'"'actually'"'"', '"'"'simply'"'"', '"'"'really'"'"', '"'"'very'"'"'. SHORT SENTENCES. Break long sentences. 10 words max.",'"$'\n''
-    fi
-
     cat > "$SETTINGS_FILE" << EOF
 {
   "\$schema": "https://json.schemastore.org/claude-code-settings.json",
@@ -1347,7 +1342,7 @@ HOOKEOF
     "commit": "",
     "pr": ""
   },
-${CAVEMAN_JSON}  "hooks": {
+  "hooks": {
     "PreToolUse": [
       {
         "matcher": "Read",
@@ -1385,6 +1380,64 @@ EOF
     if $AUTO_FORMAT; then HOOK_STATUS+=", auto-format"; fi
     if $CAVEMAN; then HOOK_STATUS+=", CAVEMAN mode"; fi
     print_status "$HOOK_STATUS"
+}
+
+# Configure CLAUDE.md with CAVEMAN mode if enabled
+configure_claude_md() {
+    if ! $CAVEMAN; then
+        return 0
+    fi
+
+    print_header "Configuring CLAUDE.md"
+
+    local CLAUDE_MD_DIR="$HOME/.claude"
+    local CLAUDE_MD_FILE="$CLAUDE_MD_DIR/CLAUDE.md"
+
+    # Create .claude directory if it doesn't exist
+    if [[ ! -d "$CLAUDE_MD_DIR" ]]; then
+        print_status "Creating $CLAUDE_MD_DIR directory..."
+        if ! $DRY_RUN; then
+            mkdir -p "$CLAUDE_MD_DIR"
+        fi
+    fi
+
+    # CAVEMAN content to add
+    local CAVEMAN_CONTENT='# Communication Style
+
+CAVEMAN MODE. Always active. No exceptions.
+Sentences: 3-6 words max. Drop all articles (no "the/a/an").
+No preamble. No sign-offs. No narration. Just do it.
+Bad idea? Say "Bad idea." Grunt ok: "Ugh." "Good."
+Wrong: "I'\''ll take a look at the code." Right: "Me look. Bug on line 42."'
+
+    # Check if file exists and already has CAVEMAN MODE
+    if [[ -f "$CLAUDE_MD_FILE" ]]; then
+        if grep -q "CAVEMAN MODE" "$CLAUDE_MD_FILE" 2>/dev/null; then
+            print_status "CLAUDE.md already contains CAVEMAN MODE section"
+            return 0
+        fi
+
+        print_status "Appending CAVEMAN MODE to existing CLAUDE.md..."
+        if ! $DRY_RUN; then
+            echo "" >> "$CLAUDE_MD_FILE"
+            echo "$CAVEMAN_CONTENT" >> "$CLAUDE_MD_FILE"
+        fi
+        print_success "Updated CLAUDE.md with CAVEMAN MODE"
+    else
+        print_status "Creating CLAUDE.md with CAVEMAN MODE..."
+        if ! $DRY_RUN; then
+            cat > "$CLAUDE_MD_FILE" << 'EOF'
+# Communication Style
+
+CAVEMAN MODE. Always active. No exceptions.
+Sentences: 3-6 words max. Drop all articles (no "the/a/an").
+No preamble. No sign-offs. No narration. Just do it.
+Bad idea? Say "Bad idea." Grunt ok: "Ugh." "Good."
+Wrong: "I'll take a look at the code." Right: "Me look. Bug on line 42."
+EOF
+        fi
+        print_success "Created CLAUDE.md with CAVEMAN MODE"
+    fi
 }
 
 # Verify environment variables
@@ -1469,6 +1522,7 @@ main() {
     configure_claude_settings
     create_keepalive_script
     create_settings_json
+    configure_claude_md
 
     print_header "Summary"
 

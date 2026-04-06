@@ -432,10 +432,6 @@ function Set-ClaudeSettings {
         hooks = $hooks
     }
 
-    if ($Caveman) {
-        $settings['appendSystemPrompt'] = "NO PREAMBLE. No 'Sure!', 'Great question!', 'Happy to help!'. Start with answer. NO SIGN-OFFS. No 'Let me know...', 'Hope this helps!', 'Feel free to ask...'. End when done. NO PROCESS NARRATION. Don't explain what you're about to do. Do it. Show result. NO FILLER. Drop 'just', 'basically', 'actually', 'simply', 'really', 'very'. SHORT SENTENCES. Break long sentences. 10 words max."
-    }
-
     if ($DryRun) {
         Write-Host "[DRY-RUN] Would write settings.json"
         return
@@ -1304,13 +1300,59 @@ exit 0'
 }
 
 function New-ClaudeMdTemplate {
-    Write-Header "Creating CLAUDE.md Template"
     $claudeDir = Join-Path $env:USERPROFILE ".claude"
     $claudeMd = Join-Path $claudeDir "CLAUDE.md"
+
+    # CAVEMAN content to add
+    $cavemanContent = @'
+
+# Communication Style
+
+CAVEMAN MODE. Always active. No exceptions.
+Sentences: 3-6 words max. Drop all articles (no "the/a/an").
+No preamble. No sign-offs. No narration. Just do it.
+Bad idea? Say "Bad idea." Grunt ok: "Ugh." "Good."
+Wrong: "I'll take a look at the code." Right: "Me look. Bug on line 42."
+'@
+
+    # If CAVEMAN mode enabled, handle CLAUDE.md creation/update
+    if ($Caveman) {
+        Write-Header "Configuring CLAUDE.md with CAVEMAN MODE"
+
+        if (Test-Path $claudeMd) {
+            # Check if already has CAVEMAN MODE
+            $existingContent = Get-Content $claudeMd -Raw
+            if ($existingContent -match "CAVEMAN MODE") {
+                Write-Status "CLAUDE.md already contains CAVEMAN MODE section - skipping"
+                return
+            }
+
+            Write-Status "Appending CAVEMAN MODE to existing CLAUDE.md..."
+            if (-not $DryRun) {
+                Add-Content $claudeMd $cavemanContent
+            } else {
+                Write-Host "[DRY-RUN] Would append CAVEMAN MODE to: $claudeMd"
+            }
+            Write-Success "Updated CLAUDE.md with CAVEMAN MODE"
+        } else {
+            Write-Status "Creating CLAUDE.md with CAVEMAN MODE..."
+            if (-not $DryRun) {
+                $cavemanContent.Trim() | Set-Content $claudeMd -Encoding UTF8
+            } else {
+                Write-Host "[DRY-RUN] Would create CLAUDE.md with CAVEMAN MODE at: $claudeMd"
+            }
+            Write-Success "Created CLAUDE.md with CAVEMAN MODE"
+        }
+        return
+    }
+
+    # Non-CAVEMAN mode: create default template if doesn't exist
+    Write-Header "Creating CLAUDE.md Template"
     if (Test-Path $claudeMd) {
         Write-Status "CLAUDE.md already exists - skipping"
         return
     }
+
     $content = @'
 # Claude Code Optimization Guide
 
