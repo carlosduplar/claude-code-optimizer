@@ -17,3 +17,4 @@ tests/extracted-text.txt
 # OS files
 .DS_Store
 Thumbs.db
+tests/benchmark/results/

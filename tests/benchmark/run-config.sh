@@ -25,10 +25,10 @@ fi
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BENCHMARK_DIR="$(dirname "$SCRIPT_DIR")"
+BENCHMARK_DIR="$SCRIPT_DIR"
 CORPUS_DIR="$BENCHMARK_DIR/corpus"
 RESULTS_DIR="$BENCHMARK_DIR/results"
-PROMPTS_FILE="$BENCHMARK_DIR/prompts.txt"
+PROMPTS_FILE="$SCRIPT_DIR/prompts.txt"
 
 mkdir -p "$RESULTS_DIR"
 
@@ -63,18 +63,12 @@ RUN_DURATION=$((RUN_END - RUN_START))
 
 # Find newest transcript in projects dir
 TRANSCRIPT_DIR="$HOME/.claude/projects"
-NEWEST_TRANSCRIPT=""
-NEWEST_TIME=0
+NEWEST_TRANSCRIPT=$(find "$TRANSCRIPT_DIR" -name "session-memory.jsonl" -type f 2>/dev/null | head -1)
 
-for file in "$TRANSCRIPT_DIR"/*/session-memory.jsonl; do
-    if [ -f "$file" ]; then
-        MTIME=$(stat -c %Y "$file" 2>/dev/null || stat -f %m "$file" 2>/dev/null)
-        if [ "$MTIME" -gt "$NEWEST_TIME" ]; then
-            NEWEST_TIME="$MTIME"
-            NEWEST_TRANSCRIPT="$file"
-        fi
-    fi
-done
+# Fallback: find any .jsonl file
+if [ -z "$NEWEST_TRANSCRIPT" ]; then
+    NEWEST_TRANSCRIPT=$(find "$TRANSCRIPT_DIR" -name "*.jsonl" -type f 2>/dev/null | head -1)
+fi
 
 if [ -z "$NEWEST_TRANSCRIPT" ]; then
     echo "Error: No transcript found after run" >&2

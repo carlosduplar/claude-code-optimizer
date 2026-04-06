@@ -2,7 +2,7 @@
 # Generate benchmark comparison report
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BENCHMARK_DIR="$(dirname "$SCRIPT_DIR")"
+BENCHMARK_DIR="$SCRIPT_DIR"
 RESULTS_DIR="$BENCHMARK_DIR/results"
 
 if ! command -v jq >/dev/null 2>&1; then

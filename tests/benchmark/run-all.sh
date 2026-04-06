@@ -4,7 +4,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-BENCHMARK_DIR="$(dirname "$SCRIPT_DIR")"
+BENCHMARK_DIR="$SCRIPT_DIR"
 CORPUS_DIR="$BENCHMARK_DIR/corpus"
 
 # Config A: No env vars, no CLAUDE.md
