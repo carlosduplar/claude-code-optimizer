@@ -163,7 +163,11 @@ parse_args() {
 
 # Detect operating system
 detect_os() {
-    if [[ "$OSTYPE" == "linux-gnu"* ]]; then
+    # Check for Termux first (Android)
+    if is_termux; then
+        OS="termux"
+        DISTRO="termux"
+    elif [[ "$OSTYPE" == "linux-gnu"* ]] || [[ "$OSTYPE" == "linux-android"* ]]; then
         OS="linux"
         if command -v apt-get &> /dev/null; then
             DISTRO="debian"
@@ -171,6 +175,10 @@ detect_os() {
             DISTRO="rhel"
         elif command -v pacman &> /dev/null; then
             DISTRO="arch"
+        elif command -v pkg &> /dev/null; then
+            # Termux package manager
+            DISTRO="termux"
+            OS="termux"
         fi
     elif [[ "$OSTYPE" == "darwin"* ]]; then
         OS="macos"
@@ -355,6 +363,9 @@ install_imagemagick() {
                     ;;
             esac
             ;;
+        termux)
+            pkg install -y imagemagick
+            ;;
         macos)
             if command_exists brew; then
                 brew install imagemagick
@@ -410,6 +421,9 @@ install_poppler() {
                     ;;
             esac
             ;;
+        termux)
+            pkg install -y poppler
+            ;;
         macos)
             if command_exists brew; then
                 brew install poppler
@@ -447,7 +461,17 @@ install_prettier() {
     fi
 
     if command_exists npm; then
-        if npm install -g prettier 2>/dev/null; then
+        # In Termux, don't use sudo
+        if [[ "$OS" == "termux" ]]; then
+            if npm install -g prettier 2>/dev/null; then
+                print_success "Prettier installed successfully"
+                return 0
+            else
+                print_error "Failed to install Prettier (try: npm install -g prettier)"
+                INSTALL_FAILED+=("prettier")
+                return 1
+            fi
+        elif npm install -g prettier 2>/dev/null; then
             print_success "Prettier installed successfully"
             return 0
         else
@@ -474,6 +498,11 @@ install_black() {
     if [[ "$OS" == "linux" && "$DISTRO" == "debian" ]]; then
         if sudo apt-get install -y black 2>/dev/null; then
             print_success "black installed via apt"
+            return 0
+        fi
+    elif [[ "$OS" == "termux" ]]; then
+        if pkg install -y black 2>/dev/null; then
+            print_success "black installed via pkg"
             return 0
         fi
     fi
@@ -528,6 +557,11 @@ install_autopep8() {
     if [[ "$OS" == "linux" && "$DISTRO" == "debian" ]]; then
         if sudo apt-get install -y python3-autopep8 2>/dev/null; then
             print_success "autopep8 installed via apt"
+            return 0
+        fi
+    elif [[ "$OS" == "termux" ]]; then
+        if pkg install -y python3-autopep8 2>/dev/null; then
+            print_success "autopep8 installed via pkg"
             return 0
         fi
     fi
