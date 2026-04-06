@@ -1336,7 +1336,7 @@ HOOKEOF
     fi
 
     if $CAVEMAN; then
-        CAVEMAN_JSON='  "appendSystemPrompt": "CAVEMAN: Strip articles, helping verbs, filler. Keep nouns, main verbs, adjectives, numbers. Raw content only.",'"$'\n''
+        CAVEMAN_JSON='  "appendSystemPrompt": "NO PREAMBLE. No '"'"'Sure!'"'"', '"'"'Great question!'"'"', '"'"'Happy to help!'"'"'. Start with answer. NO SIGN-OFFS. No '"'"'Let me know...'"'"', '"'"'Hope this helps!'"'"', '"'"'Feel free to ask...'"'"'. End when done. NO PROCESS NARRATION. Don'"'"'t explain what you'"'"'re about to do. Do it. Show result. NO FILLER. Drop '"'"'just'"'"', '"'"'basically'"'"', '"'"'actually'"'"', '"'"'simply'"'"', '"'"'really'"'"', '"'"'very'"'"'. SHORT SENTENCES. Break long sentences. 10 words max.",'"$'\n''
     fi
 
     cat > "$SETTINGS_FILE" << EOF

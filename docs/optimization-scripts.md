@@ -223,20 +223,20 @@ Enable CAVEMAN mode by adding `--caveman` (Bash) or `-Caveman` (PowerShell) to c
 
 **What it does:**
 
-Adds an `appendSystemPrompt` field to `settings.json` that instructs Claude to use minimal language:
+Adds an `appendSystemPrompt` field to `settings.json` that targets common verbosity patterns:
 
 ```json
 {
-  "appendSystemPrompt": "CAVEMAN: Strip articles, helping verbs, filler. Keep nouns, main verbs, adjectives, numbers. Raw content only."
+  "appendSystemPrompt": "NO PREAMBLE. No 'Sure!', 'Great question!', 'Happy to help!'. Start with answer. NO SIGN-OFFS. No 'Let me know...', 'Hope this helps!', 'Feel free to ask...'. End when done. NO PROCESS NARRATION. Don't explain what you're about to do. Do it. Show result. NO FILLER. Drop 'just', 'basically', 'actually', 'simply', 'really', 'very'. SHORT SENTENCES. Break long sentences. 10 words max."
 }
 ```
 
 **Effect:**
-- Claude outputs more concise responses
-- Articles (the, a, an) are stripped
-- Helping verbs (is, are, was, were) are minimized
-- Raw technical content is preserved
-- Reduces token consumption in both directions
+- Eliminates conversational padding ("Sure!", "Great question!")
+- Removes sign-offs ("Let me know if...", "Hope this helps!")
+- Stops process narration ("I'm going to...", "First I'll...")
+- Cuts filler words while keeping technical precision
+- Technical content stays complete and accurate
 
 **When to use:**
 - Technical tasks where brevity is preferred
