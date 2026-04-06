@@ -130,8 +130,10 @@ check_dependencies() {
         print_status "        brew install poppler                # macOS"
     fi
 
-    # markitdown
-    if command -v markitdown >/dev/null 2>&1; then
+    # markitdown (skip in Termux)
+    if [[ -n "$TERMUX_VERSION" ]] || [[ -d "/data/data/com.termux" ]]; then
+        print_status "Skipping markitdown check (Termux detected - not supported)"
+    elif command -v markitdown >/dev/null 2>&1; then
         print_success "markitdown installed"
     else
         print_warning "markitdown not found (optional, for Office document conversion)"

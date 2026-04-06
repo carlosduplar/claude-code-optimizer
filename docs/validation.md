@@ -6,7 +6,7 @@ This document describes how to validate that the Claude Code optimization hooks 
 
 The validation script:
 1. **Checks configuration** - Verifies hooks are properly set up in settings.json
-2. **Tests dependencies** - Ensures ImageMagick, pdftotext, and markitdown are installed
+2. **Tests dependencies** - Ensures ImageMagick, pdftotext, and markitdown are installed (markitdown is skipped in Termux)
 3. **Validates privacy settings** - Confirms environment variables are set correctly
 4. **Optional headless testing** - Can run Claude Code in headless mode to verify hooks actually fire
 

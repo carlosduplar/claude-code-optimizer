@@ -170,6 +170,15 @@ detect_os() {
     print_status "Detected OS: $OS"
 }
 
+# Detect if running in Termux environment
+is_termux() {
+    # Check for Termux-specific indicators
+    if [[ -n "$TERMUX_VERSION" ]] || [[ -d "/data/data/com.termux" ]] || [[ "$PREFIX" == *"com.termux"* ]]; then
+        return 0
+    fi
+    return 1
+}
+
 # Check if a command exists
 command_exists() {
     command -v "$1" &> /dev/null
@@ -195,6 +204,12 @@ check_python() {
 
 # Check for markitdown
 check_markitdown() {
+    # Skip in Termux - markitdown has heavy dependencies not available in Termux
+    if is_termux; then
+        print_status "Skipping markitdown check (Termux detected - not supported)"
+        return 0
+    fi
+
     if command_exists markitdown || $PYTHON_CMD -c "import markitdown" 2>/dev/null; then
         print_success "markitdown is already installed"
     else
@@ -254,6 +269,12 @@ check_formatters() {
 
 # Install markitdown
 install_markitdown() {
+    # Skip in Termux - markitdown has heavy dependencies not available in Termux
+    if is_termux; then
+        print_status "Skipping markitdown installation (Termux detected - not supported)"
+        return 0
+    fi
+
     print_status "Installing markitdown..."
     if $DRY_RUN; then
         echo "[DRY-RUN] Would run: pip3 install --user markitdown"
@@ -997,8 +1018,14 @@ if [[ "$LOWER_EXT" == "pdf" ]]; then
 fi
 
 # Office documents
+# Skip in Termux - markitdown not available
 doc_extensions="docx xlsx pptx doc xls ppt"
 if [[ " $doc_extensions " =~ " $LOWER_EXT " ]]; then
+    # Check for Termux - markitdown has heavy dependencies not available in Termux
+    if [[ -n "$TERMUX_VERSION" ]] || [[ -d "/data/data/com.termux" ]] || [[ "$PREFIX" == *"com.termux"* ]]; then
+        log "SKIPPED_DOC_CONVERTER | Termux detected - markitdown not supported | $FILE_PATH"
+        exit 0
+    fi
     if command -v markitdown >/dev/null 2>&1; then
         content=$(markitdown "$FILE_PATH" 2>/dev/null)
         if [[ -n "$content" ]]; then

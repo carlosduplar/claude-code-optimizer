@@ -81,7 +81,7 @@ After running the optimization scripts, verify that all optimizations are workin
 
 The validation suite tests every claim made by the optimization scripts:
 
-1. **Dependencies** - markitdown, ImageMagick, poppler installed and functional
+1. **Dependencies** - markitdown (optional, skipped in Termux), ImageMagick, poppler installed and functional
 2. **Privacy Variables** - All 5 environment variables set correctly
 3. **Auto-Compact** - Enabled in Claude config
 4. **Hooks** - PreToolUse and PostToolUse hooks configured
@@ -95,7 +95,7 @@ The validation suite tests every claim made by the optimization scripts:
 
 ```
 📊 DEPENDENCY CHANGES:
-  ✓ markitdown: NOT INSTALLED → INSTALLED
+  ✓ markitdown: NOT INSTALLED → INSTALLED (or skipped in Termux)
   ✓ imagemagick: NOT INSTALLED → INSTALLED
   ✓ poppler: NOT INSTALLED → INSTALLED
 
@@ -121,11 +121,14 @@ See [validation.md](validation.md) for complete documentation.
 
 Both scripts check for and install:
 
-| Dependency | Purpose | Linux/macOS | Windows |
-|------------|---------|-------------|---------|
-| **markitdown** | Convert Office/PDF → Markdown | pip | pip |
-| **ImageMagick** | Resize/optimize images | apt/yum/brew | winget/choco |
-| **poppler** | PDF text extraction | apt/yum/brew | choco |
+| Dependency | Purpose | Linux/macOS | Windows | Notes |
+|------------|---------|-------------|---------|-------|
+| **markitdown** | Convert Office/PDF → Markdown | pip | pip | _Skipped in Termux_ |
+| **ImageMagick** | Resize/optimize images | apt/yum/brew | winget/choco | |
+| **poppler** | PDF text extraction | apt/yum/brew | choco | |
+
+**Platform Notes:**
+- **Termux (Android):** markitdown is automatically skipped due to heavy dependencies (libxml, libxslt) not being readily available. Office document conversion is disabled, but image resizing and other features work normally.
 
 **Why these matter:**
 - Converting documents to text before Claude sees them reduces tokens by 10x
