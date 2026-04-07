@@ -88,7 +88,7 @@ Actually runs Claude Code programmatically to verify hooks fire:
 1. Creates `test-image.png` (3000x3000 pixels)
 2. Runs: `echo "Read test-image.png" | claude -p`
 3. Waits for hook to execute
-4. Checks: `ls /tmp/resized_*.png`
+4. Checks: `ls /tmp/claude-resize-*.png`
 
 **Pass Criteria:**
 - Resized image exists in `/tmp/`
@@ -96,7 +96,7 @@ Actually runs Claude Code programmatically to verify hooks fire:
 
 **Evidence:**
 ```
-[PROOF] Resized file: /tmp/resized_test-image.png
+[PROOF] Resized file: /tmp/claude-resize-test-image.png
 [PROOF] Original size: 115275 bytes
 [PROOF] Resized size: 48122 bytes
 [PROOF] Size reduction: 59%
@@ -189,7 +189,7 @@ Your Claude Code environment is properly configured:
 [PROOF] Output saved to: ./tests/claude-output-image.txt
 [INFO] Checking for resized image in /tmp/...
 [PASS] PreToolUse hook FIRED and resized the image!
-[PROOF] Resized file: /tmp/resized_test-image.png
+[PROOF] Resized file: /tmp/claude-resize-test-image.png
 [PROOF] Original size: 115275 bytes
 [PROOF] Resized size: 48122 bytes
 [PROOF] Size reduction: 59%

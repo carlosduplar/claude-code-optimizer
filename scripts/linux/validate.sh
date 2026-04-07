@@ -362,12 +362,12 @@ test_hooks_headless() {
         print_status "Creating a simple test image..."
         test_image="/tmp/validate-test.png"
         if command -v magick >/dev/null 2>&1; then
-            magick -size 100x100 xc:blue "$test_image" 2>/dev/null || {
+            magick -size 2500x2500 xc:blue "$test_image" 2>/dev/null || {
                 print_warning "Could not create test image, skipping headless test"
                 return 0
             }
         elif command -v convert >/dev/null 2>&1; then
-            convert -size 100x100 xc:blue "$test_image" 2>/dev/null || {
+            convert -size 2500x2500 xc:blue "$test_image" 2>/dev/null || {
                 print_warning "Could not create test image, skipping headless test"
                 return 0
             }
@@ -418,9 +418,11 @@ test_hooks_headless() {
             print_error "PostToolUse hook did not fire"
         fi
 
-        # Check for resized image
-        if [[ -f "/tmp/resized_validate-test.png" ]] || ls /tmp/resized_*.png 2>/dev/null | grep -q .; then
-            print_success "Image resizing hook executed (resized file found)"
+        # Check for resized image evidence (hook creates /tmp/claude-resize-* then copies back)
+        # Check the hook log for resize confirmation since temp file is cleaned up
+        local resize_happened=$(grep -c "RESIZED" /tmp/claude-hook-validation.log 2>/dev/null || echo "0")
+        if [[ "$resize_happened" -gt 0 ]] || ls /tmp/claude-resize-*.png 2>/dev/null | grep -q .; then
+            print_success "Image resizing hook executed (resize confirmed in logs)"
         else
             print_warning "Resized image not found (hook may have run but output path differs)"
         fi
@@ -454,7 +456,7 @@ print_manual_tests() {
     echo "2. Run this command inside Claude:"
     echo -e "   ${CYAN}Read $REPO_DIR/tests/test-image.png${NC}"
     echo "3. Check if the image was resized:"
-    echo -e "   ${CYAN}ls -la /tmp/resized_*.png${NC}"
+    echo -e "   ${CYAN}ls -la /tmp/claude-resize-*.png${NC}"
     echo "4. Expected: A resized image file should exist (~33% smaller)"
     echo ""
 

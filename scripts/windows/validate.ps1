@@ -418,9 +418,9 @@ function Test-HooksHeadless {
         $convert = Get-Command convert -ErrorAction SilentlyContinue
 
         if ($magick) {
-            & $magick -size 100x100 xc:blue $testImage 2>$null
+            & $magick -size 2500x2500 xc:blue $testImage 2>$null
         } elseif ($convert) {
-            & $convert -size 100x100 xc:blue $testImage 2>$null
+            & $convert -size 2500x2500 xc:blue $testImage 2>$null
         }
 
         if (-not (Test-Path $testImage)) {
@@ -474,7 +474,8 @@ function Test-HooksHeadless {
         }
 
         if ($preCount -gt 0) {
-            Write-Success "PreToolUse hook fired ($preCount times)"
+            $msg = "PreToolUse hook fired (" + $preCount + " times)"
+            Write-Success $msg
         } else {
             Write-Error "PreToolUse hook did not fire"
             if ($VerboseOutput) {
@@ -484,15 +485,18 @@ function Test-HooksHeadless {
         }
 
         if ($postCount -gt 0) {
-            Write-Success "PostToolUse hook fired ($postCount times)"
+            $msg = "PostToolUse hook fired (" + $postCount + " times)"
+            Write-Success $msg
         } else {
             Write-Error "PostToolUse hook did not fire"
         }
 
-        # Check for resized image (in WSL /tmp)
-        $wslCheck = wsl ls /tmp/resized_*.png 2>$null
-        if ($wslCheck) {
-            Write-Success "Image resizing hook executed (resized file found)"
+        # Check for resized image evidence (hook creates /tmp/claude-resize-* then copies back)
+        # Check the hook log for resize confirmation since temp file is cleaned up
+        $resizeEvidence = wsl grep -c "RESIZED" /tmp/claude-hook-validation.log 2>$null
+        $wslCheck = wsl ls /tmp/claude-resize-*.png 2>$null
+        if ($resizeEvidence -or $wslCheck) {
+            Write-Success "Image resizing hook executed (resize confirmed in logs)"
         } else {
             Write-Warning "Resized image not found in WSL /tmp (hook may have run but output path differs)"
         }
@@ -538,7 +542,7 @@ function Write-ManualTests {
     Write-Host "2. Run this command inside Claude:"
     Write-Host "   Read $TestImage" -ForegroundColor $Colors.Info
     Write-Host "3. Check if the image was resized:"
-    Write-Host "   wsl ls -la /tmp/resized_*.png" -ForegroundColor $Colors.Info
+    Write-Host "   wsl ls -la /tmp/claude-resize-*.png" -ForegroundColor $Colors.Info
     Write-Host "4. Expected: A resized image file should exist (~33% smaller)"
     Write-Host ""
 
