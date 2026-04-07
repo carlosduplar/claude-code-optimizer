@@ -183,7 +183,7 @@ function Test-Dependencies {
     if ($markitdown) {
         Write-Success "markitdown installed"
     } else {
-        Write-Warning "markitdown not found (optional, for Office document conversion)"
+        Write-Warning "markitdown not found (optional - for Office document conversion)"
         Write-Status "Install: pip install markitdown"
     }
 
@@ -443,12 +443,12 @@ function Test-HooksHeadless {
 
     # Run Claude in headless mode with hook events
     # Note: --include-hook-events requires --verbose flag
-    & $script:ClaudeCmd -p `
+    # Prompt must be passed via stdin for -p mode
+    "Read $wslImage" | & $script:ClaudeCmd -p `
         --output-format stream-json `
         --verbose `
         --include-hook-events `
-        --allowedTools "Read" `
-        "Read $wslImage" 2>&1 | Out-File -FilePath $outputFile -Encoding UTF8
+        --allowedTools "Read" 2>&1 | Out-File -FilePath $outputFile -Encoding UTF8
 
     $exitCode = $LASTEXITCODE
 

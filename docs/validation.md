@@ -30,15 +30,15 @@ Checks that all configurations are in place without running Claude Code:
 - Dependencies installed
 - Environment variables set
 
-### Headless Mode (`--test-hooks`)
+### Headless Mode (`-TestHooks` on Windows, `--test-hooks` on Linux)
 Actually runs Claude Code programmatically to verify hooks fire:
 1. **Creates test files** automatically
 2. **Runs Claude Code** using `claude -p` (non-interactive mode)
-3. **Sends commands** like `Read test-image.png` via stdin
+3. **Sends commands** like `Read test-image.png` via **stdin pipe**
 4. **Captures all output** to files
 5. **Checks for evidence**:
+   - Hook events in JSON output (PreToolUse and PostToolUse proof)
    - Resized images in `/tmp/` (PreToolUse proof)
-   - Hook events in output (PostToolUse proof)
 6. **Generates report** with pass/fail and evidence
 
 ## Requirements
