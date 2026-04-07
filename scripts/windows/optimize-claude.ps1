@@ -188,10 +188,10 @@ function Test-Formatter {
     }
 
     # Check for autopep8 (Python fallback)
-    $autopep8 = Get-Command autopep8 -ErrorAction SilentlyContinue
-    if ($autopep8) {
+    try {
+        & $script:PythonCmd -c "import autopep8" 2>&1 | Out-Null
         Write-Success "autopep8 is already installed"
-    } else {
+    } catch {
         Write-WarningLine "autopep8 is not installed (fallback for Python formatting)"
         $script:MissingDeps += "autopep8"
     }
@@ -254,16 +254,61 @@ function Install-Autopep8 {
     }
 
     try {
-        & $script:PythonCmd -m pip install autopep8 2>$null
-        $newAutopep8 = Get-Command autopep8 -ErrorAction SilentlyContinue
-        if ($newAutopep8) {
-            Write-Success "autopep8 installed successfully"
-        } else {
-            throw "Installation verification failed"
-        }
+        & $script:PythonCmd -m pip install autopep8 2>&1 | Out-Null
+        # Verify by importing module (more reliable than --version which may vary)
+        & $script:PythonCmd -c "import autopep8" 2>&1 | Out-Null
+        Write-Success "autopep8 installed successfully"
     } catch {
         Write-ErrorLine "Failed to install autopep8: $_"
         $script:InstallFailed += "autopep8"
+    }
+}
+
+function Install-ImageMagick {
+    Write-Status "Installing ImageMagick via winget..."
+    if ($DryRun) {
+        Write-Host "[DRY-RUN] Would run: winget install ImageMagick.Q16-HDRI"
+        return
+    }
+
+    $winget = Get-Command winget -ErrorAction SilentlyContinue
+    if (-not $winget) {
+        Write-ErrorLine "winget not found. Please install ImageMagick manually from https://imagemagick.org"
+        $script:InstallFailed += "imagemagick"
+        return
+    }
+
+    try {
+        & winget install --id ImageMagick.Q16-HDRI --source winget --accept-package-agreements --accept-source-agreements 2>$null
+        # Verify installation
+        $magick = Get-Command magick.exe -ErrorAction SilentlyContinue
+        if ($magick) {
+            Write-Success "ImageMagick installed successfully"
+        } else {
+            # May need to refresh PATH, check common install locations
+            $commonPaths = @(
+                "${env:ProgramFiles}\ImageMagick*\magick.exe",
+                "${env:LOCALAPPDATA}\Programs\ImageMagick*\magick.exe",
+                "C:\Program Files\ImageMagick*\magick.exe"
+            )
+            $found = $false
+            foreach ($pathPattern in $commonPaths) {
+                $match = Get-ChildItem -Path $pathPattern -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($match) {
+                    Write-Success "ImageMagick installed at: $($match.FullName)"
+                    Write-WarningLine "You may need to restart your terminal for magick.exe to be available in PATH"
+                    $found = $true
+                    break
+                }
+            }
+            if (-not $found) {
+                throw "Installation verification failed - magick.exe not found in PATH or common locations"
+            }
+        }
+    } catch {
+        Write-ErrorLine "Failed to install ImageMagick: $_"
+        Write-Status "You can install manually from: https://imagemagick.org/script/download.php"
+        $script:InstallFailed += "imagemagick"
     }
 }
 
@@ -322,7 +367,7 @@ function Install-Dependencies {
     foreach ($dep in $script:MissingDeps) {
         switch ($dep) {
             "markitdown" { pip install markitdown }
-            "imagemagick" { Write-WarningLine "Please install ImageMagick manually from https://imagemagick.org" }
+            "imagemagick" { Install-ImageMagick }
             "poppler" { Write-WarningLine "Please install poppler from https://github.com/oschwartz10612/poppler-windows/releases" }
             "prettier" { Install-Prettier }
             "black" { Install-Black }

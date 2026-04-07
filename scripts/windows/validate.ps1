@@ -157,14 +157,15 @@ function Test-Dependencies {
     Write-Section "📦 DEPENDENCIES"
 
     # ImageMagick
-    $magick = Get-Command magick -ErrorAction SilentlyContinue
+    $magick = Get-Command magick.exe -ErrorAction SilentlyContinue
+    $magickCmd = Get-Command magick -ErrorAction SilentlyContinue
     $convert = Get-Command convert -ErrorAction SilentlyContinue
-    if ($magick -or $convert) {
-        $imgCmd = if ($magick) { "magick" } else { "convert" }
+    if ($magick -or $magickCmd -or $convert) {
+        $imgCmd = if ($magick) { "magick.exe" } elseif ($magickCmd) { "magick" } else { "convert" }
         Write-Success "ImageMagick installed ($imgCmd)"
     } else {
         Write-Error "ImageMagick not found (required for image optimization)"
-        Write-Status "Install: winget install ImageMagick.ImageMagick"
+        Write-Status "Install: winget install ImageMagick.Q16-HDRI"
         Write-Status "        choco install imagemagick"
     }
 
@@ -179,8 +180,18 @@ function Test-Dependencies {
     }
 
     # markitdown
-    $markitdown = Get-Command markitdown -ErrorAction SilentlyContinue
-    if ($markitdown) {
+    $markitdownCmd = Get-Command markitdown -ErrorAction SilentlyContinue
+    $hasMarkitdown = $false
+    if ($markitdownCmd) {
+        $hasMarkitdown = $true
+    } else {
+        # Check as Python module (pip packages don't always create global executables on Windows)
+        try {
+            $null = & python -m markitdown --help 2>$null
+            $hasMarkitdown = $true
+        } catch {}
+    }
+    if ($hasMarkitdown) {
         Write-Success "markitdown installed"
     } else {
         Write-Warning "markitdown not found (optional - for Office document conversion)"
@@ -414,10 +425,13 @@ function Test-HooksHeadless {
         Write-Status "Creating a simple test image..."
         $testImage = "$env:TEMP\validate-test.png"
 
+        $magickExe = Get-Command magick.exe -ErrorAction SilentlyContinue
         $magick = Get-Command magick -ErrorAction SilentlyContinue
         $convert = Get-Command convert -ErrorAction SilentlyContinue
 
-        if ($magick) {
+        if ($magickExe) {
+            & $magickExe -size 2500x2500 xc:blue $testImage 2>$null
+        } elseif ($magick) {
             & $magick -size 2500x2500 xc:blue $testImage 2>$null
         } elseif ($convert) {
             & $convert -size 2500x2500 xc:blue $testImage 2>$null
