@@ -2,7 +2,7 @@
 # Run all benchmark configs A/B/C/D x 3 runs each
 
 $scriptDir = Split-Path -Parent $PSCommandPath
-$benchmarkDir = Split-Path -Parent $scriptDir
+$benchmarkDir = $scriptDir
 $corpusDir = Join-Path $benchmarkDir "corpus"
 
 # Cleanup function

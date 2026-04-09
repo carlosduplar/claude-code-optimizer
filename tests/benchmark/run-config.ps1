@@ -10,16 +10,16 @@ param(
     [int]$RunNumber
 )
 
-# Verify claude --print
-$claudeHelp = claude --help 2>$null
-if ($LASTEXITCODE -ne 0 -or $claudeHelp -notmatch "--print") {
-    Write-Error "Error: claude --print not available"
+# Verify claude -p (headless mode)
+$claudeCmd = Get-Command claude -ErrorAction SilentlyContinue
+if (-not $claudeCmd) {
+    Write-Error "Error: claude command not found"
     exit 1
 }
 
 # Get script directory
 $scriptDir = Split-Path -Parent $PSCommandPath
-$benchmarkDir = Split-Path -Parent $scriptDir
+$benchmarkDir = $scriptDir
 $corpusDir = Join-Path $benchmarkDir "corpus"
 $resultsDir = Join-Path $benchmarkDir "results"
 $promptsFile = Join-Path $benchmarkDir "prompts.txt"
@@ -48,7 +48,7 @@ Get-Content $promptsFile | ForEach-Object {
     Write-Host "Running: $prompt"
 
     Push-Location $corpusDir
-    claude --print $prompt 2>$null | Out-Null
+    claude -p $prompt 2>$null | Out-Null
     Pop-Location
 }
 

@@ -36,7 +36,7 @@
     Disable post-compact context re-injection hook
 
 .PARAMETER AutoApprove
-    Enable auto-approval whitelist for safe bash commands (opt-in)
+    Enable auto-approval whitelist for safe bash commands via settings.json permissions.allow (opt-in)
 
 .PARAMETER AutoFormat
     Enable auto-formatting after file edits (opt-in)
@@ -410,7 +410,6 @@ function Set-ClaudeSettings {
         $fileguardCmd = "bash ~/.claude/hooks/file-guard.sh"
         $notifyCmd = "bash ~/.claude/hooks/notify.sh"
         $postcompactCmd = "bash ~/.claude/hooks/post-compact.sh"
-        $autoapproveCmd = "bash ~/.claude/hooks/auto-approve.sh"
         $autoformatCmd = "bash ~/.claude/hooks/post-edit-format.sh"
     } else {
         $pretooluseCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\pretooluse.ps1`""
@@ -418,7 +417,6 @@ function Set-ClaudeSettings {
         $fileguardCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\file-guard.ps1`""
         $notifyCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\notify.ps1`""
         $postcompactCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\post-compact.ps1`""
-        $autoapproveCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\auto-approve.ps1`""
         $autoformatCmd = "powershell -NoProfile -ExecutionPolicy Bypass -File `"$hooksDir\post-edit-format.ps1`""
     }
 
@@ -454,12 +452,7 @@ function Set-ClaudeSettings {
             hooks = @(@{ type = "command"; command = $postcompactCmd; timeout = 10 })
         }
     }
-    if ($AutoApprove) {
-        $hooks.PreToolUse += @{
-            matcher = "Bash"
-            hooks = @(@{ type = "command"; command = $autoapproveCmd; timeout = 5 })
-        }
-    }
+    # Auto-approve is configured via permissions.allow in settings.json, not hooks
     if ($AutoFormat) {
         $hooks.PostToolUse += @{
             matcher = "Write|Edit|MultiEdit"
@@ -476,6 +469,42 @@ function Set-ClaudeSettings {
         }
         env = $envVars
         hooks = $hooks
+    }
+
+    # Add permissions.allow for auto-approve (using settings.json, not hooks)
+    if ($AutoApprove) {
+        $settings.permissions = @{
+            allow = @(
+                "Bash(ls *)",
+                "Bash(ll *)",
+                "Bash(find *)",
+                "Bash(grep *)",
+                "Bash(rg *)",
+                "Bash(cat *)",
+                "Bash(head *)",
+                "Bash(tail *)",
+                "Bash(wc *)",
+                "Bash(sort *)",
+                "Bash(uniq *)",
+                "Bash(pwd)",
+                "Bash(echo *)",
+                "Bash(which *)",
+                "Bash(where *)",
+                "Bash(git status*)",
+                "Bash(git log*)",
+                "Bash(git diff*)",
+                "Bash(git branch*)",
+                "Bash(git show*)",
+                "Bash(git remote*)",
+                "Bash(git stash list*)",
+                "Bash(git config*)",
+                "Bash(npm list*)",
+                "Bash(pip list*)",
+                "Bash(pip show*)",
+                "Bash(*--version)",
+                "Bash(*--help*)"
+            )
+        }
     }
 
     if ($DryRun) {
@@ -751,106 +780,6 @@ echo "Your persistent instructions from ~/.claude/CLAUDE.md have been re-injecte
 echo ""
 cat "$CLAUDE_MD"
 exit 0'
-        $autoapproveSh = '#!/usr/bin/env bash
-# auto-approve.sh - auto-approves safe read-only bash commands
-# Event: PreToolUse
-# Matcher: Bash
-# Opt-in: only installed with -AutoApprove
-# Exit 0 + JSON stdout = auto-approve | Exit 0 (no JSON) = defer to normal permission prompt
-
-INPUT="$(cat)"
-COMMAND="$(echo "$INPUT" | jq -r ''.tool_input.command // empty'')"
-LOG_FILE="/tmp/claude-auto-approve.log"
-
-# Whitelisted command prefixes (read-only, safe)
-# Bash + PowerShell (Windows) - Claude Code may use either
-SAFE_PREFIXES=(
-    # === File listing ===
-    "ls"
-    "ls "
-    "ll"
-    "ll "
-    "dir"
-    "dir "
-    "Get-ChildItem"
-    "Get-ChildItem "
-    "gci"
-    "gci "
-    # === File content ===
-    "cat "
-    "Get-Content "
-    "gc "
-    "type "
-    # === Text search ===
-    "grep "
-    "rg "
-    "Select-String "
-    "sls "
-    # === Navigation/Info ===
-    "pwd"
-    "Get-Location"
-    "gl"
-    "which "
-    "where "
-    "Get-Command "
-    "gcm "
-    # === Output/Display ===
-    "echo "
-    "Write-Host "
-    "Write-Output "
-    # === File operations (read-only) ===
-    "find "
-    "head "
-    "tail "
-    "wc "
-    "sort "
-    "uniq "
-    "Select-Object "
-    "Where-Object "
-    "Format-Table "
-    "ft "
-    "fl "
-    # === Git (read-only) ===
-    "git status"
-    "git log"
-    "git diff"
-    "git branch"
-    "git show"
-    "git remote"
-    "git stash list"
-    "git config"
-    "git config "
-    # === Package managers (read-only) ===
-    "npm list"
-    "npm run"
-    "pip list"
-    "pip show"
-    "pip freeze"
-    "Get-Package"
-    # === Version checks ===
-    "python --version"
-    "python3 --version"
-    "node --version"
-    "node -v"
-    "npm --version"
-    "npm -v"
-    "git --version"
-    "code --version"
-    "dotnet --version"
-    "docker --version"
-    "docker-compose --version"
-)
-
-for prefix in "${SAFE_PREFIXES[@]}"; do
-    if [[ "$COMMAND" == "$prefix" || "$COMMAND" == "$prefix"* ]]; then
-        echo "[auto-approve] $(date -Iseconds) APPROVED: $COMMAND" >> "$LOG_FILE"
-        printf ''{"hookSpecificOutput":{"permissionDecision":"allow"}}''
-        exit 0
-    fi
-done
-
-echo "[auto-approve] $(date -Iseconds) DEFERRED (not whitelisted): $COMMAND" >> "$LOG_FILE"
-exit 0'
         $autoformatSh = '#!/usr/bin/env bash
 # post-edit-format.sh - auto-formats files after Write/Edit/MultiEdit
 # Event: PostToolUse
@@ -914,7 +843,6 @@ exit 0'
             "notify.sh" = $notifySh
             "post-compact.sh" = $postcompactSh
         }
-        if ($AutoApprove) { $scripts["auto-approve.sh"] = $autoapproveSh }
         if ($AutoFormat) { $scripts["post-edit-format.sh"] = $autoformatSh }
         foreach ($name in $scripts.Keys) {
             $path = Join-Path $hooksDir $name
@@ -1232,114 +1160,6 @@ Write-Output "## Post-Compaction Context Refresh"
 Write-Output ""
 Get-Content $CLAUDE_MD -Raw
 exit 0'
-        $autoapprovePs1 = '# auto-approve.ps1 - auto-approves safe read-only bash commands
-# Event: PreToolUse
-# Matcher: Bash
-# Opt-in: only installed with -AutoApprove
-# Exit 0 + JSON stdout = auto-approve | Exit 0 (no JSON) = defer to normal permission prompt
-
-param()
-$ErrorActionPreference = ''Stop''
-
-$LOG_FILE = Join-Path $env:TEMP "claude-auto-approve.log"
-
-# Read JSON from stdin
-$inputJson = [Console]::In.ReadToEnd()
-$payload = $inputJson | ConvertFrom-Json
-
-$command = $payload.tool_input.command
-
-$timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
-
-# Whitelisted command prefixes (read-only, safe)
-# Bash + PowerShell (Windows) - Claude Code may use either
-$SAFE_PREFIXES = @(
-    # === File listing ===
-    "ls",
-    "ls ",
-    "ll",
-    "ll ",
-    "dir",
-    "dir ",
-    "Get-ChildItem",
-    "Get-ChildItem ",
-    "gci",
-    "gci ",
-    # === File content ===
-    "cat ",
-    "Get-Content ",
-    "gc ",
-    "type ",
-    # === Text search ===
-    "grep ",
-    "rg ",
-    "Select-String ",
-    "sls ",
-    # === Navigation/Info ===
-    "pwd",
-    "Get-Location",
-    "gl",
-    "which ",
-    "where ",
-    "Get-Command ",
-    "gcm ",
-    # === Output/Display ===
-    "echo ",
-    "Write-Host ",
-    "Write-Output ",
-    # === File operations (read-only) ===
-    "find ",
-    "head ",
-    "tail ",
-    "wc ",
-    "sort ",
-    "uniq ",
-    "Select-Object ",
-    "Where-Object ",
-    "Format-Table ",
-    "ft ",
-    "fl ",
-    # === Git (read-only) ===
-    "git status",
-    "git log",
-    "git diff",
-    "git branch",
-    "git show",
-    "git remote",
-    "git stash list",
-    "git config",
-    "git config ",
-    # === Package managers (read-only) ===
-    "npm list",
-    "npm run",
-    "pip list",
-    "pip show",
-    "pip freeze",
-    "Get-Package",
-    # === Version checks ===
-    "python --version",
-    "python3 --version",
-    "node --version",
-    "node -v",
-    "npm --version",
-    "npm -v",
-    "git --version",
-    "code --version",
-    "dotnet --version",
-    "docker --version",
-    "docker-compose --version"
-)
-
-foreach ($prefix in $SAFE_PREFIXES) {
-    if ($command -eq $prefix -or $command.StartsWith($prefix)) {
-        Add-Content -Path $LOG_FILE -Value "[auto-approve] $timestamp APPROVED: $command" -ErrorAction SilentlyContinue
-        [Console]::Out.Write(''{"hookSpecificOutput":{"permissionDecision":"allow"}}'')
-        exit 0
-    }
-}
-
-Add-Content -Path $LOG_FILE -Value "[auto-approve] $timestamp DEFERRED (not whitelisted): $command" -ErrorAction SilentlyContinue
-exit 0'
         $autoformatPs1 = '# post-edit-format.ps1 - auto-formats files after Write/Edit/MultiEdit
 # Event: PostToolUse
 # Matcher: Write|Edit|MultiEdit
@@ -1423,7 +1243,6 @@ exit 0'
             "notify.ps1" = $notifyPs1
             "post-compact.ps1" = $postcompactPs1
         }
-        if ($AutoApprove) { $scripts["auto-approve.ps1"] = $autoapprovePs1 }
         if ($AutoFormat) { $scripts["post-edit-format.ps1"] = $autoformatPs1 }
         foreach ($name in $scripts.Keys) {
             $path = Join-Path $hooksDir $name
@@ -1468,7 +1287,8 @@ Task state, changed paths, pending errors, last instruction verbatim. Skip theor
 '@
 
     # Concise template content (used for both CAVEMAN and default mode now)
-    $conciseContent = @'---
+    $conciseContent = @'
+---
 ## Communication
 No articles, filler, pleasantries, hedging, preamble, postamble, tool announce, step narrate.
 Execute first, explain only if asked. One sentence per concept.
@@ -1543,6 +1363,9 @@ function Test-Optimizations {
             $val = $settings.env.$var
             $results += @{ Check = "env.$var is set"; Pass = (-not [string]::IsNullOrEmpty($val)); Value = $val }
         }
+        if ($AutoApprove) {
+            $results += @{ Check = "permissions.allow is configured"; Pass = ($settings.permissions.allow -and $settings.permissions.allow.Count -gt 0) }
+        }
     }
     $hooksDir = Join-Path $env:USERPROFILE ".claude\hooks"
     $hookExt = if ($script:BashAvailable) { ".sh" } else { ".ps1" }
@@ -1550,7 +1373,6 @@ function Test-Optimizations {
     if (-not $NoGuard) { $requiredHooks += "file-guard$hookExt" }
     if (-not $NoNotify) { $requiredHooks += "notify$hookExt" }
     if (-not $NoContextRefresh) { $requiredHooks += "post-compact$hookExt" }
-    if ($AutoApprove) { $requiredHooks += "auto-approve$hookExt" }
     if ($AutoFormat) { $requiredHooks += "post-edit-format$hookExt" }
     foreach ($scriptName in $requiredHooks) {
         $scriptPath = Join-Path $hooksDir $scriptName
@@ -1559,7 +1381,7 @@ function Test-Optimizations {
     $claudeMd = Join-Path $env:USERPROFILE ".claude\CLAUDE.md"
     if (Test-Path $claudeMd) {
         $content = Get-Content $claudeMd -Raw
-        $results += @{ Check = "CLAUDE.md has Compact Instructions"; Pass = ($content -match 'Compact Instructions') }
+        $results += @{ Check = "CLAUDE.md has Compact section"; Pass = ($content -match '## Compact') }
     }
     else {
         $results += @{ Check = "CLAUDE.md exists"; Pass = $false }
@@ -1618,7 +1440,7 @@ function Show-Summary {
     Write-Host "  - PostToolUse/*: Validation logger"
     if (-not $NoNotify) { Write-Host "  - Notification/*: Desktop notifications" }
     if (-not $NoContextRefresh) { Write-Host "  - SessionStart/compact: Context re-injection" }
-    if ($AutoApprove) { Write-Host "  - PreToolUse/Bash: Auto-approve safe commands" }
+    if ($AutoApprove) { Write-Host "  - permissions.allow: Auto-approve safe commands (settings.json)" }
     if ($AutoFormat) { Write-Host "  - PostToolUse/Write|Edit: Auto-format after edits" }
     Write-Host ""
     Write-Host "Privacy mode: " -NoNewline
@@ -1646,7 +1468,7 @@ if ($Experimental) { Write-Host "  Experimental features: ENABLED" -ForegroundCo
 if ($NoGuard) { Write-Host "  File guard: DISABLED" -ForegroundColor Yellow }
 if ($NoNotify) { Write-Host "  Desktop notifications: DISABLED" -ForegroundColor Yellow }
 if ($NoContextRefresh) { Write-Host "  Context refresh after compact: DISABLED" -ForegroundColor Yellow }
-if ($AutoApprove) { Write-Host "  Auto-approve safe commands: ENABLED" -ForegroundColor Green }
+if ($AutoApprove) { Write-Host "  Auto-approve via permissions.allow: ENABLED" -ForegroundColor Green }
 if ($AutoFormat) { Write-Host "  Auto-format after edits: ENABLED" -ForegroundColor Green }
 Write-Host ""
 

@@ -89,7 +89,7 @@ Usage: $0 [OPTIONS]
 
 OPTIONS:
     --reduced-privacy Use reduced privacy (telemetry disabled only, keeps auto-updates)
-    --auto-approve    Enable auto-approval for safe read-only commands (opt-in)
+    --auto-approve    Enable auto-approval for safe read-only commands via settings.json permissions.allow (opt-in)
     --auto-format     Enable auto-formatting after file edits (opt-in)
     --caveman         Enable CAVEMAN mode (concise system prompt for token savings)
     --dry-run         Show what would be done without making changes
@@ -1214,114 +1214,6 @@ exit 0
 HOOKEOF
     chmod +x "$HOOKS_DIR/posttooluse.sh"
 
-    # Create auto-approve.sh hook script (if --auto-approve enabled)
-    if $AUTO_APPROVE; then
-        cat > "$HOOKS_DIR/auto-approve.sh" << 'HOOKEOF'
-#!/usr/bin/env bash
-# auto-approve.sh - auto-approves safe read-only bash commands
-# Event: PreToolUse
-# Matcher: Bash
-# Opt-in: only installed with --auto-approve
-# Exit 0 + JSON stdout = auto-approve | Exit 0 (no JSON) = defer to normal permission prompt
-
-INPUT="$(cat)"
-COMMAND="$(echo "$INPUT" | jq -r '.tool_input.command // empty')"
-LOG_FILE="/tmp/claude-auto-approve.log"
-
-# Whitelisted command prefixes (read-only, safe)
-# Bash + PowerShell (Windows) - Claude Code may use either
-SAFE_PREFIXES=(
-    # === File listing ===
-    "ls"
-    "ls "
-    "ll"
-    "ll "
-    "dir"
-    "dir "
-    "Get-ChildItem"
-    "Get-ChildItem "
-    "gci"
-    "gci "
-    # === File content ===
-    "cat "
-    "Get-Content "
-    "gc "
-    "type "
-    # === Text search ===
-    "grep "
-    "rg "
-    "Select-String "
-    "sls "
-    # === Navigation/Info ===
-    "pwd"
-    "Get-Location"
-    "gl"
-    "which "
-    "where "
-    "Get-Command "
-    "gcm "
-    # === Output/Display ===
-    "echo "
-    "Write-Host "
-    "Write-Output "
-    # === File operations (read-only) ===
-    "find "
-    "head "
-    "tail "
-    "wc "
-    "sort "
-    "uniq "
-    "Select-Object "
-    "Where-Object "
-    "Format-Table "
-    "ft "
-    "fl "
-    # === Git (read-only) ===
-    "git status"
-    "git log"
-    "git diff"
-    "git branch"
-    "git show"
-    "git remote"
-    "git stash list"
-    "git config"
-    "git config "
-    # === Package managers (read-only) ===
-    "npm list"
-    "npm run"
-    "pip list"
-    "pip show"
-    "pip freeze"
-    "Get-Package"
-    # === Version checks ===
-    "python --version"
-    "python3 --version"
-    "node --version"
-    "node -v"
-    "npm --version"
-    "npm -v"
-    "git --version"
-    "code --version"
-    "dotnet --version"
-    "docker --version"
-    "docker-compose --version"
-)
-
-for prefix in "${SAFE_PREFIXES[@]}"; do
-    if [[ "$COMMAND" == "$prefix" || "$COMMAND" == "$prefix"* ]]; then
-        echo "[auto-approve] $(date -Iseconds) APPROVED: $COMMAND" >> "$LOG_FILE"
-        printf '{"hookSpecificOutput":{"permissionDecision":"allow"}}'
-        exit 0
-    fi
-done
-
-echo "[auto-approve] $(date -Iseconds) DEFERRED (not whitelisted): $COMMAND" >> "$LOG_FILE"
-exit 0
-HOOKEOF
-        chmod +x "$HOOKS_DIR/auto-approve.sh"
-        print_success "Created auto-approve.sh hook"
-    fi
-
     # Create post-edit-format.sh hook script (if --auto-format enabled)
     if $AUTO_FORMAT; then
         cat > "$HOOKS_DIR/post-edit-format.sh" << 'HOOKEOF'
@@ -1412,21 +1304,44 @@ HOOKEOF
         return 0
     fi
 
-    # Create settings.json with hook references
-    local AUTO_APPROVE_HOOK=""
-    local AUTO_FORMAT_HOOK=""
-
+    # Build permissions.allow array for auto-approve
+    local PERMISSIONS_JSON=""
     if $AUTO_APPROVE; then
-        AUTO_APPROVE_HOOK='      {
-        "matcher": "Bash",
-        "hooks": [{
-          "type": "command",
-          "command": "bash '"$HOOKS_DIR"'/auto-approve.sh",
-          "timeout": 5
-        }]
-      },'
+        PERMISSIONS_JSON='  "permissions": {
+    "allow": [
+      "Bash(ls *)",
+      "Bash(ll *)",
+      "Bash(find *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(sort *)",
+      "Bash(uniq *)",
+      "Bash(pwd)",
+      "Bash(echo *)",
+      "Bash(which *)",
+      "Bash(where *)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git branch*)",
+      "Bash(git show*)",
+      "Bash(git remote*)",
+      "Bash(git stash list*)",
+      "Bash(git config*)",
+      "Bash(npm list*)",
+      "Bash(pip list*)",
+      "Bash(pip show*)",
+      "Bash(*--version)",
+      "Bash(*--help*)"
+    ]
+  },'
     fi
 
+    # Create settings.json with hooks and optional permissions
     cat > "$SETTINGS_FILE" << EOF
 {
   "\$schema": "https://json.schemastore.org/claude-code-settings.json",
@@ -1435,6 +1350,7 @@ HOOKEOF
     "commit": "",
     "pr": ""
   },
+${PERMISSIONS_JSON}
   "hooks": {
     "PreToolUse": [
       {
@@ -1445,7 +1361,6 @@ HOOKEOF
           "timeout": 30
         }]
       },
-${AUTO_APPROVE_HOOK}
       {
         "matcher": "Write|Edit|MultiEdit|Bash",
         "hooks": [{
@@ -1467,10 +1382,9 @@ ${AUTO_APPROVE_HOOK}
 }
 EOF
 
-    local HOOK_STATUS="Hooks configured: PreToolUse (Read, file-guard"
-    if $AUTO_APPROVE; then HOOK_STATUS+=", auto-approve"; fi
-    HOOK_STATUS+=", Write/Bash), PostToolUse"
+    local HOOK_STATUS="Hooks configured: PreToolUse (Read, file-guard, Write/Bash), PostToolUse"
     if $AUTO_FORMAT; then HOOK_STATUS+=", auto-format"; fi
+    if $AUTO_APPROVE; then HOOK_STATUS+=", auto-approve (via permissions.allow)"; fi
     print_status "$HOOK_STATUS"
 }
 
@@ -1691,7 +1605,7 @@ main() {
     fi
 
     local SUMMARY_HOOKS="Auto-compact, image pre-processing, cache keepalive, no-attribution, concise-prompts"
-    if $AUTO_APPROVE; then SUMMARY_HOOKS+=", auto-approve"; fi
+    if $AUTO_APPROVE; then SUMMARY_HOOKS+=", auto-approve (permissions.allow)"; fi
     if $AUTO_FORMAT; then SUMMARY_HOOKS+=", auto-format"; fi
     echo -e "${BOLD}Hooks configured:${NC} $SUMMARY_HOOKS"
     echo ""

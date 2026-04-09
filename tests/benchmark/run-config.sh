@@ -12,14 +12,9 @@ if [ -z "$CONFIG_NAME" ] || [ -z "$RUN_NUMBER" ]; then
     exit 1
 fi
 
-# Verify claude --print available
+# Verify claude -p (headless) available
 if ! command -v claude >/dev/null 2>&1; then
     echo "Error: claude command not found" >&2
-    exit 1
-fi
-
-if ! claude --help 2>/dev/null | grep -q "\-\-print"; then
-    echo "Error: claude --print not available" >&2
     exit 1
 fi
 
@@ -52,9 +47,9 @@ while IFS= read -r prompt || [ -n "$prompt" ]; do
 
     echo "Running: $prompt"
 
-    # Run claude --print
+    # Run claude -p (headless)
     cd "$CORPUS_DIR"
-    claude --print "$prompt" >/dev/null 2>&1 || true
+    claude -p "$prompt" >/dev/null 2>&1 || true
 
 done < "$PROMPTS_FILE"
 

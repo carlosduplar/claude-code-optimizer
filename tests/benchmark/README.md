@@ -45,7 +45,7 @@ tests/benchmark/
 
 ## Prerequisites
 
-- `claude --print` available
+- `claude -p` (headless mode) available
 - `jq` installed for JSON parsing
 - Bash or PowerShell 7
 
@@ -84,7 +84,7 @@ Results print as table showing % change vs Config A baseline.
 
 ## Troubleshooting
 
-**"claude --print not available"**
+**"claude -p not available"**
 - Update Claude Code CLI to latest
 
 **"jq required but not installed"**
