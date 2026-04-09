@@ -1,6 +1,9 @@
 # Local Claude Code configuration (user-level configs are in ~/.claude/)
 .claude/
 
+# Claude Code official documentation (local mirror)
+raw/
+
 # Development/planning artifacts
 IMPLEMENTATION-PLAN*.md
 CLAUDE-CODE-TEST-SCRIPT.md
