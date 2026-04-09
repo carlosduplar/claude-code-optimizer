@@ -41,8 +41,8 @@
 .PARAMETER AutoFormat
     Enable auto-formatting after file edits (opt-in)
 
-.PARAMETER Caveman
-    Enable CAVEMAN mode (concise system prompt for token savings)
+.PARAMETER Concise
+    Enable concise communication mode (CLAUDE.md instructions for token savings)
 
 .EXAMPLE
     .\optimize-claude.ps1
@@ -57,8 +57,8 @@
     Preview changes without applying them
 
 .EXAMPLE
-    .\optimize-claude.ps1 -Caveman
-    Enable CAVEMAN concise prompt mode for maximum token savings
+    .\optimize-claude.ps1 -Concise
+    Enable concise CLAUDE.md mode for maximum token savings
 #>
 
 [CmdletBinding()]
@@ -73,7 +73,7 @@ param(
     [switch]$NoContextRefresh,
     [switch]$AutoApprove,
     [switch]$AutoFormat,
-    [switch]$Caveman
+    [switch]$Concise
 )
 
 $Colors = @{
@@ -1260,8 +1260,8 @@ function New-ClaudeMdTemplate {
     $claudeDir = Join-Path $env:USERPROFILE ".claude"
     $claudeMd = Join-Path $claudeDir "CLAUDE.md"
 
-    # Concise content for CAVEMAN mode
-    $cavemanContent = @'
+    # Concise content for concise mode
+    $conciseTemplate = @'
 ---
 ## Communication
 No articles, filler, pleasantries, hedging, preamble, postamble, tool announce, step narrate.

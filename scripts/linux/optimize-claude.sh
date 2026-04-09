@@ -29,7 +29,7 @@ SKIP_DEPS=false
 VERIFY_ONLY=false
 AUTO_APPROVE=false
 AUTO_FORMAT=false
-CAVEMAN=false
+CONCISE=false
 
 # Dependency tracking
 MISSING_DEPS=()
@@ -91,7 +91,7 @@ OPTIONS:
     --reduced-privacy Use reduced privacy (telemetry disabled only, keeps auto-updates)
     --auto-approve    Enable auto-approval for safe read-only commands via settings.json permissions.allow (opt-in)
     --auto-format     Enable auto-formatting after file edits (opt-in)
-    --caveman         Enable CAVEMAN mode (concise system prompt for token savings)
+    --concise         Enable concise communication mode (CLAUDE.md for token savings)
     --dry-run         Show what would be done without making changes
     --skip-deps       Skip dependency installation
     --verify          Verify current environment variable configuration
@@ -102,7 +102,7 @@ EXAMPLES:
     $0 --reduced-privacy  # Reduced privacy (standard telemetry disabled)
     $0 --auto-approve     # Enable auto-approval for safe commands
     $0 --auto-format      # Enable auto-formatting after edits
-    $0 --caveman          # Enable CAVEMAN concise prompt mode
+    $0 --concise          # Enable concise CLAUDE.md mode
     $0 --dry-run          # Preview changes
     $0 --verify           # Check current env var configuration
 
@@ -132,8 +132,8 @@ parse_args() {
                 AUTO_FORMAT=true
                 shift
                 ;;
-            --caveman)
-                CAVEMAN=true
+            --concise)
+                CONCISE=true
                 shift
                 ;;
             --dry-run)
