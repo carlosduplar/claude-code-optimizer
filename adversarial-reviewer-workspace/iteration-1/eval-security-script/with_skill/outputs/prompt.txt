@@ -1,3 +1,40 @@
+You are an adversarial security-focused code reviewer. Review the following bash script for security vulnerabilities, data loss risks, and unsafe operations.
+
+**CRITICAL ISSUES (must fix):**
+- Security vulnerabilities (injection, path traversal, secrets exposure, race conditions)
+- Data loss risks
+- Legal/compliance issues
+- Factual inaccuracies
+
+**IMPROVEMENTS (should fix):**
+- Error handling gaps
+- Edge cases not covered
+- Maintainability issues
+- Performance problems
+
+**SUGGESTIONS (nice to have):**
+- Code organization
+- Documentation clarity
+- User experience improvements
+
+**QUESTIONS (need clarification):**
+- Ambiguous logic
+- Unverified claims
+- Missing context
+
+Be harsh but constructive. Cite specific line numbers. Don't hold back.
+
+Focus on these specific attack vectors:
+1. Shell injection risks (unquoted variables, eval, dynamic command construction)
+2. Path traversal bypasses (symlink attacks, relative path manipulation)
+3. Race conditions with temporary files
+4. In-place file modifications without backups
+5. Command execution in "safe" whitelists
+
+---
+FILE: scripts/linux/optimize-claude.sh
+---
+
 #!/bin/bash
 #
 # Claude Code Token Optimizer & Privacy Enhancer
@@ -1229,54 +1266,13 @@ COMMAND="$(echo "$INPUT" | jq -r '.tool_input.command // empty')"
 LOG_FILE="/tmp/claude-auto-approve.log"
 
 # Whitelisted command prefixes (read-only, safe)
-# Bash + PowerShell (Windows) - Claude Code may use either
 SAFE_PREFIXES=(
-    # === File listing ===
     "ls"
-    "ls "
-    "ll"
-    "ll "
-    "dir"
-    "dir "
-    "Get-ChildItem"
-    "Get-ChildItem "
-    "gci"
-    "gci "
-    # === File content ===
     "cat "
-    "Get-Content "
-    "gc "
-    "type "
-    # === Text search ===
-    "grep "
-    "rg "
-    "Select-String "
-    "sls "
-    # === Navigation/Info ===
+    "echo "
     "pwd"
-    "Get-Location"
-    "gl"
     "which "
     "where "
-    "Get-Command "
-    "gcm "
-    # === Output/Display ===
-    "echo "
-    "Write-Host "
-    "Write-Output "
-    # === File operations (read-only) ===
-    "find "
-    "head "
-    "tail "
-    "wc "
-    "sort "
-    "uniq "
-    "Select-Object "
-    "Where-Object "
-    "Format-Table "
-    "ft "
-    "fl "
-    # === Git (read-only) ===
     "git status"
     "git log"
     "git diff"
@@ -1284,27 +1280,22 @@ SAFE_PREFIXES=(
     "git show"
     "git remote"
     "git stash list"
-    "git config"
-    "git config "
-    # === Package managers (read-only) ===
     "npm list"
     "npm run"
     "pip list"
     "pip show"
-    "pip freeze"
-    "Get-Package"
-    # === Version checks ===
     "python --version"
     "python3 --version"
     "node --version"
     "node -v"
     "npm --version"
     "npm -v"
-    "git --version"
-    "code --version"
-    "dotnet --version"
-    "docker --version"
-    "docker-compose --version"
+    "Get-Content "
+    "Get-ChildItem"
+    "Write-Host"
+    "Select-String"
+    "type "
+    "dir "
 )
 
 for prefix in "${SAFE_PREFIXES[@]}"; do
@@ -1387,7 +1378,7 @@ HOOKEOF
       "matcher": "Write|Edit|MultiEdit",
       "hooks": [{
         "type": "command",
-        "command": "bash '"$HOOKS_DIR"'/post-edit-format.sh",
+        "command": "bash '"'"'$HOOKS_DIR'"'"'/post-edit-format.sh",
         "timeout": 30
       }]
     }'
@@ -1421,7 +1412,7 @@ HOOKEOF
         "matcher": "Bash",
         "hooks": [{
           "type": "command",
-          "command": "bash '"$HOOKS_DIR"'/auto-approve.sh",
+          "command": "bash '"'"'$HOOKS_DIR'"'"'/auto-approve.sh",
           "timeout": 5
         }]
       },'
@@ -1471,11 +1462,16 @@ EOF
     if $AUTO_APPROVE; then HOOK_STATUS+=", auto-approve"; fi
     HOOK_STATUS+=", Write/Bash), PostToolUse"
     if $AUTO_FORMAT; then HOOK_STATUS+=", auto-format"; fi
+    if $CAVEMAN; then HOOK_STATUS+=", CAVEMAN mode"; fi
     print_status "$HOOK_STATUS"
 }
 
-# Configure CLAUDE.md with concise format
+# Configure CLAUDE.md with CAVEMAN mode if enabled
 configure_claude_md() {
+    if ! $CAVEMAN; then
+        return 0
+    fi
+
     print_header "Configuring CLAUDE.md"
 
     local CLAUDE_MD_DIR="$HOME/.claude"
@@ -1489,74 +1485,67 @@ configure_claude_md() {
         fi
     fi
 
-    # Concise content for CLAUDE.md
-    local CONCISE_CONTENT
-    read -r -d '' CONCISE_CONTENT << 'CONTENTEOF'
----
-## Communication
-No articles, filler, pleasantries, hedging, preamble, postamble, tool announce, step narrate.
-Execute first, explain only if asked. One sentence per concept.
-Fragments OK. Short synonyms. Pattern: [thing] [action] [reason]. [next step].
-Technical terms exact. Code blocks unchanged. Errors quoted exact.
-Git commits, PRs: normal.
+    # CAVEMAN content to add
+    local CAVEMAN_CONTENT
+    read -r -d '' CAVEMAN_CONTENT << 'CAVEMANEOF'
+# Communication Style
 
-## Principles
-KISS. YAGNI. DRY. No emojis in code or comments.
-Check updated docs before architecture/dependency/tool decisions. Use context7 if available.
+CAVEMAN MODE. Always active. No exceptions.
+Sentences: 3-6 words max. Drop all articles (no "the/a/an").
+No preamble. No sign-offs. No narration. Just do it.
+Bad idea? Say "Bad idea." Grunt ok: "Ugh." "Good."
+Wrong: "I'll take a look at the code." Right: "Me look. Bug on line 42."
 
-## Workflow
-Read target file before any edit. Never attempt write without prior read in same session.
-Make smallest correct change. After edits: run linter/tests if available.
-File >500 lines: use offset+limit. Search before full read.
+## Compact Instructions
 
-## Documentation
-Update when: conventions change, blocker found, architecture shifts.
+When compaction occurs, preserve exactly:
+- Current task state (what we're doing)
+- File paths changed (with line numbers if editing)
+- Pending errors (verbatim, if unresolved)
+- Last user instruction (verbatim)
 
-## Compact
-Task state, changed paths, pending errors, last instruction verbatim. Skip theory, completed tasks, unrelated snippets.
-CONTENTEOF
+Skip: background theory, completed sub-tasks, general education.
+Keep code snippets only if they are the direct subject of the next task.
+CAVEMANEOF
 
-    # Check if file exists and already has the concise format
+    # Check if file exists and already has CAVEMAN MODE
     if [[ -f "$CLAUDE_MD_FILE" ]]; then
-        if grep -q "## Communication" "$CLAUDE_MD_FILE" 2>/dev/null && grep -q "KISS. YAGNI. DRY." "$CLAUDE_MD_FILE" 2>/dev/null; then
-            print_status "CLAUDE.md already contains concise format"
+        if grep -q "CAVEMAN MODE" "$CLAUDE_MD_FILE" 2>/dev/null; then
+            print_status "CLAUDE.md already contains CAVEMAN MODE section"
             return 0
         fi
 
-        print_status "Replacing existing CLAUDE.md with concise format..."
+        print_status "Appending CAVEMAN MODE to existing CLAUDE.md..."
         if ! $DRY_RUN; then
-            echo "$CONCISE_CONTENT" > "$CLAUDE_MD_FILE"
+            echo "" >> "$CLAUDE_MD_FILE"
+            echo "$CAVEMAN_CONTENT" >> "$CLAUDE_MD_FILE"
         fi
-        print_success "Updated CLAUDE.md with concise format"
+        print_success "Updated CLAUDE.md with CAVEMAN MODE"
     else
-        print_status "Creating CLAUDE.md with concise format..."
+        print_status "Creating CLAUDE.md with CAVEMAN MODE..."
         if ! $DRY_RUN; then
             cat > "$CLAUDE_MD_FILE" << 'EOF'
----
-## Communication
-No articles, filler, pleasantries, hedging, preamble, postamble, tool announce, step narrate.
-Execute first, explain only if asked. One sentence per concept.
-Fragments OK. Short synonyms. Pattern: [thing] [action] [reason]. [next step].
-Technical terms exact. Code blocks unchanged. Errors quoted exact.
-Git commits, PRs: normal.
+# Communication Style
 
-## Principles
-KISS. YAGNI. DRY. No emojis in code or comments.
-Check updated docs before architecture/dependency/tool decisions. Use context7 if available.
+CAVEMAN MODE. Always active. No exceptions.
+Sentences: 3-6 words max. Drop all articles (no "the/a/an").
+No preamble. No sign-offs. No narration. Just do it.
+Bad idea? Say "Bad idea." Grunt ok: "Ugh." "Good."
+Wrong: "I'll take a look at the code." Right: "Me look. Bug on line 42."
 
-## Workflow
-Read target file before any edit. Never attempt write without prior read in same session.
-Make smallest correct change. After edits: run linter/tests if available.
-File >500 lines: use offset+limit. Search before full read.
+## Compact Instructions
 
-## Documentation
-Update when: conventions change, blocker found, architecture shifts.
+When compaction occurs, preserve exactly:
+- Current task state (what we're doing)
+- File paths changed (with line numbers if editing)
+- Pending errors (verbatim, if unresolved)
+- Last user instruction (verbatim)
 
-## Compact
-Task state, changed paths, pending errors, last instruction verbatim. Skip theory, completed tasks, unrelated snippets.
+Skip: background theory, completed sub-tasks, general education.
+Keep code snippets only if they are the direct subject of the next task.
 EOF
         fi
-        print_success "Created CLAUDE.md with concise format"
+        print_success "Created CLAUDE.md with CAVEMAN MODE"
     fi
 }
 
@@ -1690,9 +1679,10 @@ main() {
         echo -e "${BOLD}Privacy mode:${NC} Standard (telemetry disabled)"
     fi
 
-    local SUMMARY_HOOKS="Auto-compact, image pre-processing, cache keepalive, no-attribution, concise-prompts"
+    local SUMMARY_HOOKS="Auto-compact, image pre-processing, cache keepalive, no-attribution"
     if $AUTO_APPROVE; then SUMMARY_HOOKS+=", auto-approve"; fi
     if $AUTO_FORMAT; then SUMMARY_HOOKS+=", auto-format"; fi
+    if $CAVEMAN; then SUMMARY_HOOKS+=", caveman"; fi
     echo -e "${BOLD}Hooks configured:${NC} $SUMMARY_HOOKS"
     echo ""
 
@@ -1705,3 +1695,31 @@ main() {
 # Run main function
 main "$@"
 
+---
+END OF FILE
+---
+
+Provide output in this exact structure:
+
+## Executive Summary
+[Overall risk level: CRITICAL / HIGH / MEDIUM / LOW]
+
+## Critical Issues (Fix Immediately)
+| # | Issue | Location | Risk |
+|---|-------|----------|------|
+| 1 | [Description] | [file:line] | [Impact] |
+
+## Improvements (Should Fix)
+| # | Issue | Location | Recommendation |
+|---|-------|----------|----------------|
+| 1 | [Description] | [file:line] | [Fix approach] |
+
+## Suggestions (Nice to Have)
+- [List of suggestions]
+
+## Questions
+- [Clarification needed]
+
+## Top 5 Priority Fixes
+1. [Highest priority]
+2. ...

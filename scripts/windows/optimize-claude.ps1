@@ -763,13 +763,54 @@ COMMAND="$(echo "$INPUT" | jq -r ''.tool_input.command // empty'')"
 LOG_FILE="/tmp/claude-auto-approve.log"
 
 # Whitelisted command prefixes (read-only, safe)
+# Bash + PowerShell (Windows) - Claude Code may use either
 SAFE_PREFIXES=(
+    # === File listing ===
     "ls"
+    "ls "
+    "ll"
+    "ll "
+    "dir"
+    "dir "
+    "Get-ChildItem"
+    "Get-ChildItem "
+    "gci"
+    "gci "
+    # === File content ===
     "cat "
-    "echo "
+    "Get-Content "
+    "gc "
+    "type "
+    # === Text search ===
+    "grep "
+    "rg "
+    "Select-String "
+    "sls "
+    # === Navigation/Info ===
     "pwd"
+    "Get-Location"
+    "gl"
     "which "
     "where "
+    "Get-Command "
+    "gcm "
+    # === Output/Display ===
+    "echo "
+    "Write-Host "
+    "Write-Output "
+    # === File operations (read-only) ===
+    "find "
+    "head "
+    "tail "
+    "wc "
+    "sort "
+    "uniq "
+    "Select-Object "
+    "Where-Object "
+    "Format-Table "
+    "ft "
+    "fl "
+    # === Git (read-only) ===
     "git status"
     "git log"
     "git diff"
@@ -777,22 +818,27 @@ SAFE_PREFIXES=(
     "git show"
     "git remote"
     "git stash list"
+    "git config"
+    "git config "
+    # === Package managers (read-only) ===
     "npm list"
     "npm run"
     "pip list"
     "pip show"
+    "pip freeze"
+    "Get-Package"
+    # === Version checks ===
     "python --version"
     "python3 --version"
     "node --version"
     "node -v"
     "npm --version"
     "npm -v"
-    "Get-Content "
-    "Get-ChildItem"
-    "Write-Host"
-    "Select-String"
-    "type "
-    "dir "
+    "git --version"
+    "code --version"
+    "dotnet --version"
+    "docker --version"
+    "docker-compose --version"
 )
 
 for prefix in "${SAFE_PREFIXES[@]}"; do
@@ -1206,13 +1252,54 @@ $command = $payload.tool_input.command
 $timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ss"
 
 # Whitelisted command prefixes (read-only, safe)
+# Bash + PowerShell (Windows) - Claude Code may use either
 $SAFE_PREFIXES = @(
+    # === File listing ===
     "ls",
+    "ls ",
+    "ll",
+    "ll ",
+    "dir",
+    "dir ",
+    "Get-ChildItem",
+    "Get-ChildItem ",
+    "gci",
+    "gci ",
+    # === File content ===
     "cat ",
-    "echo ",
+    "Get-Content ",
+    "gc ",
+    "type ",
+    # === Text search ===
+    "grep ",
+    "rg ",
+    "Select-String ",
+    "sls ",
+    # === Navigation/Info ===
     "pwd",
+    "Get-Location",
+    "gl",
     "which ",
     "where ",
+    "Get-Command ",
+    "gcm ",
+    # === Output/Display ===
+    "echo ",
+    "Write-Host ",
+    "Write-Output ",
+    # === File operations (read-only) ===
+    "find ",
+    "head ",
+    "tail ",
+    "wc ",
+    "sort ",
+    "uniq ",
+    "Select-Object ",
+    "Where-Object ",
+    "Format-Table ",
+    "ft ",
+    "fl ",
+    # === Git (read-only) ===
     "git status",
     "git log",
     "git diff",
@@ -1220,22 +1307,27 @@ $SAFE_PREFIXES = @(
     "git show",
     "git remote",
     "git stash list",
+    "git config",
+    "git config ",
+    # === Package managers (read-only) ===
     "npm list",
     "npm run",
     "pip list",
     "pip show",
+    "pip freeze",
+    "Get-Package",
+    # === Version checks ===
     "python --version",
     "python3 --version",
     "node --version",
     "node -v",
     "npm --version",
     "npm -v",
-    "Get-Content ",
-    "Get-ChildItem",
-    "Write-Host",
-    "Select-String",
-    "type ",
-    "dir "
+    "git --version",
+    "code --version",
+    "dotnet --version",
+    "docker --version",
+    "docker-compose --version"
 )
 
 foreach ($prefix in $SAFE_PREFIXES) {
@@ -1349,109 +1441,81 @@ function New-ClaudeMdTemplate {
     $claudeDir = Join-Path $env:USERPROFILE ".claude"
     $claudeMd = Join-Path $claudeDir "CLAUDE.md"
 
-    # CAVEMAN content to add
-    $cavemanContent = @'
+    # Concise content for CAVEMAN mode
+    $cavemanContent = @'---
+## Communication
+No articles, filler, pleasantries, hedging, preamble, postamble, tool announce, step narrate.
+Execute first, explain only if asked. One sentence per concept.
+Fragments OK. Short synonyms. Pattern: [thing] [action] [reason]. [next step].
+Technical terms exact. Code blocks unchanged. Errors quoted exact.
+Git commits, PRs: normal.
 
-# Communication Style
+## Principles
+KISS. YAGNI. DRY. No emojis in code or comments.
+Check updated docs before architecture/dependency/tool decisions. Use context7 if available.
 
-CAVEMAN MODE. Always active. No exceptions.
-Sentences: 3-6 words max. Drop all articles (no "the/a/an").
-No preamble. No sign-offs. No narration. Just do it.
-Bad idea? Say "Bad idea." Grunt ok: "Ugh." "Good."
-Wrong: "I'll take a look at the code." Right: "Me look. Bug on line 42."
+## Workflow
+Read target file before any edit. Never attempt write without prior read in same session.
+Make smallest correct change. After edits: run linter/tests if available.
+File >500 lines: use offset+limit. Search before full read.
 
-## Compact Instructions
+## Documentation
+Update when: conventions change, blocker found, architecture shifts.
 
-When compaction occurs, preserve exactly:
-- Current task state (what we're doing)
-- File paths changed (with line numbers if editing)
-- Pending errors (verbatim, if unresolved)
-- Last user instruction (verbatim)
-
-Skip: background theory, completed sub-tasks, general education.
-Keep code snippets only if they are the direct subject of the next task.
+## Compact
+Task state, changed paths, pending errors, last instruction verbatim. Skip theory, completed tasks, unrelated snippets.
 '@
 
-    # If CAVEMAN mode enabled, handle CLAUDE.md creation/update
-    if ($Caveman) {
-        Write-Header "Configuring CLAUDE.md with CAVEMAN MODE"
+    # Concise template content (used for both CAVEMAN and default mode now)
+    $conciseContent = @'---
+## Communication
+No articles, filler, pleasantries, hedging, preamble, postamble, tool announce, step narrate.
+Execute first, explain only if asked. One sentence per concept.
+Fragments OK. Short synonyms. Pattern: [thing] [action] [reason]. [next step].
+Technical terms exact. Code blocks unchanged. Errors quoted exact.
+Git commits, PRs: normal.
 
-        if (Test-Path $claudeMd) {
-            # Check if already has CAVEMAN MODE
-            $existingContent = Get-Content $claudeMd -Raw
-            if ($existingContent -match "CAVEMAN MODE") {
-                Write-Status "CLAUDE.md already contains CAVEMAN MODE section - skipping"
-                return
-            }
+## Principles
+KISS. YAGNI. DRY. No emojis in code or comments.
+Check updated docs before architecture/dependency/tool decisions. Use context7 if available.
 
-            Write-Status "Appending CAVEMAN MODE to existing CLAUDE.md..."
-            if (-not $DryRun) {
-                Add-Content $claudeMd $cavemanContent
-            } else {
-                Write-Host "[DRY-RUN] Would append CAVEMAN MODE to: $claudeMd"
-            }
-            Write-Success "Updated CLAUDE.md with CAVEMAN MODE"
-        } else {
-            Write-Status "Creating CLAUDE.md with CAVEMAN MODE..."
-            if (-not $DryRun) {
-                $cavemanContent.Trim() | Set-Content $claudeMd -Encoding UTF8
-            } else {
-                Write-Host "[DRY-RUN] Would create CLAUDE.md with CAVEMAN MODE at: $claudeMd"
-            }
-            Write-Success "Created CLAUDE.md with CAVEMAN MODE"
-        }
-        return
-    }
+## Workflow
+Read target file before any edit. Never attempt write without prior read in same session.
+Make smallest correct change. After edits: run linter/tests if available.
+File >500 lines: use offset+limit. Search before full read.
 
-    # Non-CAVEMAN mode: create default template if doesn't exist
+## Documentation
+Update when: conventions change, blocker found, architecture shifts.
+
+## Compact
+Task state, changed paths, pending errors, last instruction verbatim. Skip theory, completed tasks, unrelated snippets.
+'@
+
     Write-Header "Creating CLAUDE.md Template"
     if (Test-Path $claudeMd) {
-        Write-Status "CLAUDE.md already exists - skipping"
-        return
+        # Check if already has the concise format
+        $existingContent = Get-Content $claudeMd -Raw
+        if ($existingContent -match "## Communication" -and $existingContent -match "KISS. YAGNI. DRY.") {
+            Write-Status "CLAUDE.md already contains concise format - skipping"
+            return
+        }
+
+        Write-Status "Replacing existing CLAUDE.md with concise format..."
+        if (-not $DryRun) {
+            $conciseContent | Set-Content $claudeMd -Encoding UTF8
+        } else {
+            Write-Host "[DRY-RUN] Would replace CLAUDE.md with concise format at: $claudeMd"
+        }
+        Write-Success "Updated CLAUDE.md with concise format"
+    } else {
+        Write-Status "Creating CLAUDE.md with concise format..."
+        if (-not $DryRun) {
+            $conciseContent | Set-Content $claudeMd -Encoding UTF8
+        } else {
+            Write-Host "[DRY-RUN] Would create CLAUDE.md with concise format at: $claudeMd"
+        }
+        Write-Success "Created CLAUDE.md at: $claudeMd"
     }
-
-    $content = @'
-# Claude Code Optimization Guide
-
-## Cost-First Defaults
-- **Default model**: sonnet (or haiku for quick tasks)
-- **Always use offset/limit** for reads >500 lines
-- **Pre-convert**: PDF->text, Office->Markdown, images->2000x2000 max
-- **Compact at**: 150K tokens
-
-## File Reading Guidelines
-### Always Use Pagination
-For files >500 lines, always specify offset and limit:
-```
-Read file.ts {"offset": 1, "limit": 100}
-```
-
-### Search Before Reading
-Use Grep/Glob to find specific content before reading entire files.
-
-### Binary File Handling
-Pre-convert binary files before reading:
-- PDFs: Use pdftotext.exe or markitdown
-- DOCX/XLSX/PPTX: markitdown
-- Images: magick.exe -resize 2000x2000
-
-## Compact Instructions
-
-When compaction occurs, preserve exactly:
-- Current task state (what we're doing)
-- File paths changed (with line numbers if editing)
-- Pending errors (verbatim, if unresolved)
-- Last user instruction (verbatim)
-
-Skip: background theory, completed sub-tasks, general education.
-Keep code snippets only if they are the direct subject of the next task.
-'@
-    if ($DryRun) {
-        Write-Host "[DRY-RUN] Would write CLAUDE.md to: $claudeMd"
-        return
-    }
-    $content | Set-Content $claudeMd -Encoding UTF8
-    Write-Success "Created CLAUDE.md at: $claudeMd"
 }
 
 function Test-Optimizations {

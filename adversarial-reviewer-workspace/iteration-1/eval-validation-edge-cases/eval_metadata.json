@@ -1,0 +1,19 @@
+{
+  "eval_id": 3,
+  "eval_name": "validation-edge-cases",
+  "prompt": "Review the scripts/linux/validate.sh file for edge cases, error handling gaps, and race conditions. Use an adversarial approach - think about all the ways this could fail in practice. Focus on: 1) WSL path conversion edge cases, 2) Temporary file race conditions, 3) Missing error handling, 4) Concurrent execution issues. Output a structured report with specific findings.",
+  "assertions": [
+    {
+      "name": "finds_temp_file_race",
+      "description": "Identifies predictable temp file names as race condition risk"
+    },
+    {
+      "name": "finds_wsl_conversion_issues",
+      "description": "Identifies WSL path conversion edge cases (UNC, spaces)"
+    },
+    {
+      "name": "suggests_improvements",
+      "description": "Provides actionable improvement recommendations"
+    }
+  ]
+}

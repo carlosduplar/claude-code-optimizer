@@ -1,0 +1,30 @@
+{
+  "assertion_results": [
+    {
+      "text": "Finds in-place resize risk (line ~1042)",
+      "passed": true,
+      "evidence": "Report identifies in-place file modifications without atomic operations at lines 760-761, 803-809"
+    },
+    {
+      "text": "Finds npm run security issue",
+      "passed": true,
+      "evidence": "Report identifies 'npm run' in whitelist but focuses more on prefix matching bypass at line 1264-1269"
+    },
+    {
+      "text": "Finds path traversal bypass",
+      "passed": false,
+      "evidence": "Report mentions path patterns but doesn't specifically identify path traversal bypass technique"
+    },
+    {
+      "text": "Provides line numbers",
+      "passed": true,
+      "evidence": "Report includes specific line numbers (1232-1270, 1264-1269, etc.)"
+    },
+    {
+      "text": "Structured output format",
+      "passed": false,
+      "evidence": "Report uses custom structure (Executive Summary, Critical Severity Issues) rather than the specified format"
+    }
+  ],
+  "timestamp": "2026-04-07T12:01:00Z"
+}

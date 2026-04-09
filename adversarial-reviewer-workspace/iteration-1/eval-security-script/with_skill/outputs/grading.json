@@ -1,0 +1,30 @@
+{
+  "assertion_results": [
+    {
+      "text": "Finds in-place resize risk (line ~1042)",
+      "passed": true,
+      "evidence": "Report identifies in-place image modification with predictable temp file names at lines 1035, 1072-1079"
+    },
+    {
+      "text": "Finds npm run security issue",
+      "passed": true,
+      "evidence": "Report identifies 'npm run' in auto-approve whitelist as dangerous at line 1283"
+    },
+    {
+      "text": "Finds path traversal bypass",
+      "passed": true,
+      "evidence": "Report identifies blocked pattern bypass potential in file-guard.sh at lines 1185-1188"
+    },
+    {
+      "text": "Provides line numbers",
+      "passed": true,
+      "evidence": "Report includes specific line numbers throughout (e.g., 303, 511, 570, 759, 1035, 1056, 1263-1269)"
+    },
+    {
+      "text": "Structured output format",
+      "passed": true,
+      "evidence": "Report follows Critical/Improvements/Suggestions/Questions structure exactly as specified"
+    }
+  ],
+  "timestamp": "2026-04-07T12:01:00Z"
+}

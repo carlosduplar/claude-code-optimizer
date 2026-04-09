@@ -1,0 +1,23 @@
+{
+  "eval_id": 2,
+  "eval_name": "docs-accuracy-review",
+  "prompt": "Review the docs/prompt-caching.md file for factual inaccuracies, unverified claims, and logical flaws. Use an adversarial approach - question everything that isn't rigorously proven. Focus on: 1) The 5-minute cache TTL claim being unverified, 2) Whether hook-based keepalive actually affects API cache, 3) Outdated pricing information, 4) Any HIPAA or compliance claims. Output a structured report with specific citations from the document.",
+  "assertions": [
+    {
+      "name": "questions_cache_ttl_claim",
+      "description": "Questions the unverified 5-minute cache TTL claim"
+    },
+    {
+      "name": "identifies_cache_logic_flaw",
+      "description": "Identifies that hook output doesn't affect API-level cache"
+    },
+    {
+      "name": "provides_specific_citations",
+      "description": "Findings include specific citations with line/section references"
+    },
+    {
+      "name": "challenges_hipaa_claims",
+      "description": "Flags HIPAA claims as potentially inaccurate/liability risk"
+    }
+  ]
+}

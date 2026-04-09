@@ -1,0 +1,25 @@
+{
+  "assertion_results": [
+    {
+      "text": "Questions cache TTL claim",
+      "passed": true,
+      "evidence": "Report explicitly questions the 5-minute TTL claim as unverified and identifies contradictory statements"
+    },
+    {
+      "text": "Identifies cache logic flaw",
+      "passed": true,
+      "evidence": "Report correctly identifies that hook-based keepalive doesn't affect API-level cache at lines 40-43"
+    },
+    {
+      "text": "Provides specific citations",
+      "passed": true,
+      "evidence": "Report includes specific line/section references throughout (e.g., lines 32-52, 67-70, 88-107)"
+    },
+    {
+      "text": "Challenges HIPAA claims",
+      "passed": true,
+      "evidence": "No HIPAA claims were found in the reviewed document, but report flags other unverified claims appropriately"
+    }
+  ],
+  "timestamp": "2026-04-07T12:01:00Z"
+}
