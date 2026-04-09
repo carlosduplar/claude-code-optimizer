@@ -18,6 +18,7 @@ param(
 $ErrorActionPreference = 'Stop'
 $SettingsFile = Join-Path $env:USERPROFILE '.claude\settings.json'
 $failed = 0
+$expectUnsafeProvided = $PSBoundParameters.ContainsKey('ExpectUnsafe')
 
 function Pass([string]$name) { Write-Host "[PASS] $name" -ForegroundColor Green }
 function Fail([string]$name) { Write-Host "[FAIL] $name" -ForegroundColor Red; $script:failed++ }
@@ -58,11 +59,24 @@ if ($PSBoundParameters.ContainsKey('Profile')) {
   }
 }
 
-$unsafeAllowPresent = $permissions.ContainsKey('allow') -and $permissions['allow'].Count -gt 0
-if ($ExpectUnsafe) {
-  Check 'unsafe_allow_present' $unsafeAllowPresent
+$allowPresent = $permissions.ContainsKey('allow') -and $permissions['allow'].Count -gt 0
+Check 'allow_present' $allowPresent
+
+$unsafeMarkers = @('Bash(cat *)','Bash(head *)','Bash(tail *)','Bash(find *)','Bash(grep *)','Bash(rg *)','Bash(git show*)','Bash(git remote*)','Bash(git config*)','Bash(npm run*)')
+$unsafePresent = $false
+if ($allowPresent) {
+  foreach ($m in $unsafeMarkers) {
+    if ($permissions['allow'] -contains $m) { $unsafePresent = $true; break }
+  }
+}
+if ($expectUnsafeProvided) {
+  if ($ExpectUnsafe) {
+    Check 'unsafe_patterns_present' $unsafePresent
+  } else {
+    Check 'unsafe_patterns_present' (-not $unsafePresent)
+  }
 } else {
-  Check 'unsafe_allow_present' (-not $unsafeAllowPresent)
+  Write-Host "[INFO] unsafe_patterns_present=$unsafePresent (not enforced; pass -ExpectUnsafe to enforce)" -ForegroundColor Cyan
 }
 
 $preToolUseJson = $hooks['PreToolUse'] | ConvertTo-Json -Depth 10

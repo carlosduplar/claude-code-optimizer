@@ -151,6 +151,10 @@ input="$(cat)"
 tool_name="$(echo "$input" | jq -r '.tool_name // empty')"
 file_path="$(echo "$input" | jq -r '.tool_input.file_path // .tool_input.filePath // empty')"
 command_str="$(echo "$input" | jq -r '.tool_input.command // empty')"
+cwd="$(echo "$input" | jq -r '.cwd // empty')"
+project_dir="${CLAUDE_PROJECT_DIR:-$cwd}"
+[[ -z "$project_dir" ]] && project_dir="$PWD"
+project_dir="$(realpath -m "$project_dir")"
 
 patterns=(
   '\.env$'
@@ -171,6 +175,15 @@ block() {
   exit 2
 }
 
+is_outside_project() {
+  local raw_path="$1"
+  local resolved
+  [[ -z "$raw_path" ]] && return 1
+  raw_path="${raw_path/#\~/$HOME}"
+  resolved="$(realpath -m "$raw_path")"
+  [[ "$resolved" != "$project_dir" && "$resolved" != "$project_dir/"* ]]
+}
+
 match_any() {
   local value="$1"
   for p in "${patterns[@]}"; do
@@ -185,11 +198,25 @@ if [[ "$tool_name" == "Write" || "$tool_name" == "Edit" || "$tool_name" == "Mult
   if [[ -n "$file_path" ]] && match_any "$file_path"; then
     block "path '$file_path' matches protected pattern"
   fi
+  if [[ -n "$file_path" ]] && is_outside_project "$file_path"; then
+    block "write/edit outside workspace is blocked: '$file_path'"
+  fi
 fi
 
 if [[ "$tool_name" == "Bash" && -n "$command_str" ]]; then
   if match_any "$command_str"; then
     block "bash command references protected path/pattern"
+  fi
+  if echo "$command_str" | grep -qiE '^[[:space:]]*(cat|head|tail|grep|rg|find)\b'; then
+    if echo "$command_str" | grep -qE '(^|[[:space:]])\.\./'; then
+      block "path traversal is blocked for high-risk read commands"
+    fi
+    while IFS= read -r token; do
+      [[ -z "$token" ]] && continue
+      if is_outside_project "$token"; then
+        block "high-risk read command target outside workspace: '$token'"
+      fi
+    done < <(echo "$command_str" | grep -oE '(~?/[^[:space:];|&]+|\.{1,2}/[^[:space:];|&]+)' || true)
   fi
 fi
 
@@ -249,6 +276,15 @@ settings = {
   "attribution": {"commit": "", "pr": ""},
   "env": {},
   "permissions": {
+    "allow": [
+      "Bash(ls *)", "Bash(ll *)", "Bash(dir *)",
+      "Bash(Get-ChildItem *)", "Bash(gci *)",
+      "Bash(pwd)", "Bash(Get-Location)", "Bash(gl)",
+      "Bash(which *)", "Bash(where *)", "Bash(Get-Command *)", "Bash(gcm *)",
+      "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git branch*)", "Bash(git stash list*)",
+      "Bash(npm list*)", "Bash(pip list*)", "Bash(pip show*)", "Bash(pip freeze*)", "Bash(Get-Package*)",
+      "Bash(*--version)", "Bash(* -v)", "Bash(*--help*)"
+    ],
     "deny": [
       "Read(./.env)",
       "Read(./.env.*)",
@@ -336,6 +372,7 @@ if unsafe:
       "Bash(npm list*)", "Bash(pip list*)", "Bash(pip show*)", "Bash(*--version)", "Bash(*--help*)"
     ]
   )
+  settings["permissions"]["allow"] = list(dict.fromkeys(settings["permissions"]["allow"]))
 
 print(json.dumps(settings))
 PY

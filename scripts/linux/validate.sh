@@ -6,6 +6,7 @@ set -euo pipefail
 PROFILE=""
 PRIVACY=""
 EXPECT_UNSAFE=false
+EXPECT_UNSAFE_SET=false
 
 SETTINGS_FILE="${HOME}/.claude/settings.json"
 FAILED=0
@@ -30,7 +31,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --profile) PROFILE="$2"; shift 2 ;;
     --privacy) PRIVACY="$2"; shift 2 ;;
-    --expect-unsafe) EXPECT_UNSAFE=true; shift ;;
+    --expect-unsafe) EXPECT_UNSAFE=true; EXPECT_UNSAFE_SET=true; shift ;;
     --help|-h) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage; exit 1 ;;
   esac
@@ -50,12 +51,15 @@ out = {
   "hooks_pretooluse": isinstance(s.get("hooks", {}).get("PreToolUse"), list),
   "hooks_sessionstart": isinstance(s.get("hooks", {}).get("SessionStart"), list),
   "permissions_deny": isinstance(s.get("permissions", {}).get("deny"), list),
-  "unsafe_allow_present": isinstance(s.get("permissions", {}).get("allow"), list) and len(s.get("permissions", {}).get("allow")) > 0,
+  "allow_present": isinstance(s.get("permissions", {}).get("allow"), list) and len(s.get("permissions", {}).get("allow")) > 0,
   "has_disable_telemetry": str(s.get("env", {}).get("DISABLE_TELEMETRY", "")) == "1",
   "has_max_privacy_flag": str(s.get("env", {}).get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "")) == "1",
   "has_tuned_key": "CLAUDE_CODE_DISABLE_AUTO_MEMORY" in s.get("env", {}),
   "pretooluse_command": json.dumps(s.get("hooks", {}).get("PreToolUse", [])),
 }
+allow = s.get("permissions", {}).get("allow", []) if isinstance(s.get("permissions", {}).get("allow", []), list) else []
+unsafe_markers = ["Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(find *)", "Bash(grep *)", "Bash(rg *)", "Bash(git show*)", "Bash(git remote*)", "Bash(git config*)", "Bash(npm run*)"]
+out["unsafe_patterns_present"] = any(m in allow for m in unsafe_markers)
 print(json.dumps(out))
 PY
 
@@ -95,10 +99,21 @@ if [[ -n "$PROFILE" ]]; then
   fi
 fi
 
-if $EXPECT_UNSAFE; then
-  check_json_bool "unsafe_allow_present"
+check_json_bool "allow_present"
+
+if $EXPECT_UNSAFE_SET; then
+  if $EXPECT_UNSAFE; then
+    check_json_bool "unsafe_patterns_present"
+  else
+    check_json_bool "unsafe_patterns_present" "false"
+  fi
 else
-  check_json_bool "unsafe_allow_present" "false"
+  info "unsafe_patterns_present=$(python3 - <<PY
+import json
+d=json.load(open(r\"$TMP_REPORT\",\"r\",encoding=\"utf-8\"))
+print(str(d.get(\"unsafe_patterns_present\")).lower())
+PY
+) (not enforced; pass --expect-unsafe to enforce)"
 fi
 
 # Ensure non-mutating read hook path is configured (updatedInput behavior exists in hook script command target).

@@ -40,7 +40,8 @@ This project configures Claude Code using a single file:
 ## Safety defaults
 
 - `Read` preprocessing is non-mutating (temp artifacts + `updatedInput` redirection)
-- broad Bash auto-approve is disabled by default
+- default Bash auto-approve is limited to conservative read-only metadata commands
+- high-risk content-read commands are only enabled with `--unsafe-auto-approve`
 - keepalive is reminder-based (SessionStart), not fake PostToolUse hook output
 
 ## Notes

@@ -119,6 +119,11 @@ $toolName = $payload.tool_name
 $filePath = $payload.tool_input.file_path
 if (-not $filePath) { $filePath = $payload.tool_input.filePath }
 $command = $payload.tool_input.command
+$cwd = $payload.cwd
+$projectDir = $env:CLAUDE_PROJECT_DIR
+if (-not $projectDir) { $projectDir = $cwd }
+if (-not $projectDir) { $projectDir = (Get-Location).Path }
+$projectDir = [IO.Path]::GetFullPath($projectDir)
 
 $patterns = @(
   '\.env$', '\.env\.', '\.git\\|\.git/', '\.ssh\\|\.ssh/', 'id_rsa', 'id_ed25519', '\.pem$', '\.key$', 'credentials\.json$', 'secrets\.'
@@ -132,9 +137,24 @@ function Matches([string]$value) {
   return $false
 }
 
+function IsOutsideProject([string]$pathValue) {
+  if (-not $pathValue) { return $false }
+  $candidate = $pathValue.Replace('~', $env:USERPROFILE)
+  try {
+    $resolved = [IO.Path]::GetFullPath($candidate)
+    return (-not ($resolved -eq $projectDir -or $resolved.StartsWith($projectDir + [IO.Path]::DirectorySeparatorChar)))
+  } catch {
+    return $false
+  }
+}
+
 if ($toolName -in @('Write','Edit','MultiEdit')) {
   if (Matches $filePath) {
     [Console]::Error.WriteLine("BLOCKED: path '$filePath' matches protected pattern")
+    exit 2
+  }
+  if (IsOutsideProject $filePath) {
+    [Console]::Error.WriteLine("BLOCKED: write/edit outside workspace is blocked: '$filePath'")
     exit 2
   }
 }
@@ -142,6 +162,20 @@ if ($toolName -in @('Write','Edit','MultiEdit')) {
 if ($toolName -eq 'Bash' -and (Matches $command)) {
   [Console]::Error.WriteLine('BLOCKED: bash command references protected path/pattern')
   exit 2
+}
+
+if ($toolName -eq 'Bash' -and $command -match '^\s*(cat|head|tail|grep|rg|find|Get-Content|type|Select-String|sls)\b') {
+  if ($command -match '(^|\s)\.\.[\\/]+') {
+    [Console]::Error.WriteLine('BLOCKED: path traversal is blocked for high-risk read commands')
+    exit 2
+  }
+  $matches = [regex]::Matches($command, '(~?[\\/][^ ;|&]+|\.{1,2}[\\/][^ ;|&]+)')
+  foreach ($m in $matches) {
+    if (IsOutsideProject $m.Value) {
+      [Console]::Error.WriteLine("BLOCKED: high-risk read command target outside workspace: '$($m.Value)'")
+      exit 2
+    }
+  }
 }
 
 exit 0
@@ -228,6 +262,15 @@ function Get-RenderedSettings {
     attribution = @{ commit = ''; pr = '' }
     env = $envVars
     permissions = @{
+      allow = @(
+        'Bash(ls *)','Bash(ll *)','Bash(dir *)',
+        'Bash(Get-ChildItem *)','Bash(gci *)',
+        'Bash(pwd)','Bash(Get-Location)','Bash(gl)',
+        'Bash(which *)','Bash(where *)','Bash(Get-Command *)','Bash(gcm *)',
+        'Bash(git status*)','Bash(git log*)','Bash(git diff*)','Bash(git branch*)','Bash(git stash list*)',
+        'Bash(npm list*)','Bash(pip list*)','Bash(pip show*)','Bash(pip freeze*)','Bash(Get-Package*)',
+        'Bash(*--version)','Bash(* -v)','Bash(*--help*)'
+      )
       deny = @(
         'Read(./.env)',
         'Read(./.env.*)',
@@ -271,14 +314,14 @@ function Get-RenderedSettings {
   }
 
   if ($UnsafeAutoApprove) {
-    $settings.permissions.allow = @(
-      'Bash(ls *)','Bash(ll *)','Bash(find *)','Bash(grep *)','Bash(rg *)',
+    $settings.permissions.allow += @(
+      'Bash(find *)','Bash(grep *)','Bash(rg *)',
       'Bash(cat *)','Bash(head *)','Bash(tail *)','Bash(wc *)','Bash(sort *)',
-      'Bash(uniq *)','Bash(pwd)','Bash(echo *)','Bash(which *)','Bash(where *)',
-      'Bash(git status*)','Bash(git log*)','Bash(git diff*)','Bash(git branch*)',
+      'Bash(uniq *)','Bash(echo *)',
       'Bash(git show*)','Bash(git remote*)','Bash(git stash list*)','Bash(git config*)',
-      'Bash(npm list*)','Bash(pip list*)','Bash(pip show*)','Bash(*--version)','Bash(*--help*)'
+      'Bash(npm run*)'
     )
+    $settings.permissions.allow = @($settings.permissions.allow | Select-Object -Unique)
   }
 
   return $settings

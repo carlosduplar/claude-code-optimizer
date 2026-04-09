@@ -101,6 +101,10 @@ See [CLAUDE.md](CLAUDE.md). Contains compressed behavioral anchors for communica
 
 The project no longer claims PostToolUse-hook keepalive behavior. Keepalive is reminder-based (`SessionStart`) and manual (`/loop`) by design.
 
+### Bash Auto-Approve Defaults
+
+Default install includes a conservative read-only metadata allowlist (listing/location/git metadata/version/help/package metadata). Higher-risk content-read patterns are added only with `--unsafe-auto-approve`.
+
 ## How It Works
 
 These optimizations target the three largest cost drivers: prompt cache misses, verbose output, and large input files.
