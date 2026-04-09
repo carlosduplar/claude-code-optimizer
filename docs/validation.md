@@ -41,7 +41,9 @@ Static validation checks configuration shape only. To verify hooks are actually 
 
 Runtime test validates:
 
-- `SessionStart`, `PreToolUse` hook events are emitted
+- `PreToolUse` hook activity is observed on a `Read`
+- `SessionStart` is best-effort in non-interactive mode (`-p`) and may show as warning
+- `PostToolUse` is reported as configured/skipped unless explicitly exercised with write/edit flow
 - `Read` hook does not mutate the original test file
 - file-guard blocks traversal-style command attempts
 
