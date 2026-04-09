@@ -6,7 +6,7 @@ Scripts, CLAUDE.md template, and env vars to cut Claude Code token usage and cos
 
 **Prerequisites:** PowerShell 7 (Windows) or Bash (Linux/macOS/WSL2)
 
-**Clone and run:**
+**Clone and run (default: tuned profile + max privacy):**
 ```powershell
 # Windows
 git clone https://github.com/carlosduplar/claude-code-optimizer.git
@@ -24,19 +24,42 @@ cp claude-code-optimizer/CLAUDE.md ./CLAUDE.md
 
 **Tested:** Windows PowerShell 7.6, Ubuntu WSL2
 
+## Profiles
+
+| Profile | Purpose |
+|---------|---------|
+| `official` | Official-docs-aligned baseline defaults |
+| `tuned` | Official baseline + reverse-engineered tuning overlay |
+
+`tuned` is the default profile.
+
 ## What It Optimizes
 
 | Technique | Mechanism | Measured Impact |
 |-----------|-----------|-----------------|
-| Prompt cache keepalive | Background timer every 4min | Up to 90% input cost reduction on cache hit |
+| Keepalive guidance | SessionStart reminder (manual `/loop`) | Avoids false hook-based keepalive assumptions |
 | Binary preprocessing | markitdown conversion before API call | 50-80% token reduction on binary files |
-| Compact CLAUDE.md | Caveman-compressed behavioral anchors | ~45% reduction on session-start input |
+| Compact CLAUDE.md | Compressed behavioral anchors | ~45% reduction on session-start input |
 | experimentalSystemReminder | Per-turn style injection | Eliminates style drift, no per-turn CLAUDE.md reload |
 | Telemetry blocking | Disables Datadog/BigQuery/OTLP endpoints | Reduces non-essential outbound traffic |
 
 *Cache savings only realized on hit; binary savings depend on file type.*
 
 ## Configuration Reference
+
+All optimizer-managed runtime configuration is written to `~/.claude/settings.json`.
+
+### Optimizer CLI
+
+| Flag | Values | Default |
+|------|--------|---------|
+| `--profile` | `official` or `tuned` | `tuned` |
+| `--privacy` | `standard` or `max` | `max` |
+| `--unsafe-auto-approve` | enable broad Bash allowlist | off |
+| `--auto-format` | enable post-edit format hook | off |
+| `--dry-run` | preview without writes | off |
+| `--skip-deps` | skip dependency checks | off |
+| `--verify` | validate current settings only | off |
 
 ### Environment Variables
 
@@ -74,9 +97,9 @@ cp claude-code-optimizer/CLAUDE.md ./CLAUDE.md
 
 See [CLAUDE.md](CLAUDE.md). Contains compressed behavioral anchors for communication style, principles, workflow, and documentation. Copy to project root for ~45% session-start reduction.
 
-### experimentalSystemReminder
+### Keepalive
 
-Per-turn injection keeps behavioral anchors active deep into long sessions. See [docs/experimental-system-reminder.md](docs/experimental-system-reminder.md).
+The project no longer claims PostToolUse-hook keepalive behavior. Keepalive is reminder-based (`SessionStart`) and manual (`/loop`) by design.
 
 ## How It Works
 
@@ -84,7 +107,7 @@ These optimizations target the three largest cost drivers: prompt cache misses, 
 
 | Document | What It Covers |
 |----------|----------------|
-| [Prompt Caching & Keepalive](docs/prompt-caching.md) | 5-minute TTL behavior, cache invalidation triggers, keepalive strategies |
+| [Prompt Caching & Keepalive](docs/prompt-caching.md) | 5-minute TTL behavior, invalidation triggers, realistic keepalive strategies |
 | [Session Memory & Compaction](docs/session-memory.md) | Proactive/reactive compaction, memdir taxonomy, CACHED_MICROCOMPACT |
 | [Binary Preprocessing](docs/optimization-scripts.md) | Automated setup for token efficiency and privacy |
 | [Undocumented Features](docs/undocumented-features.md) | 88+ compile-time feature flags, 60+ environment variables |
@@ -102,7 +125,7 @@ Reverse-engineered from alleged source analysis. Not official Anthropic document
 | [Tool System Architecture](docs/tool-system.md) | MCP/LSP integration internals, permission context flow | reference only |
 | [Permission System & Auto-Mode Classifier](docs/permission-system.md) | Two-stage XML classifier, iron gate logic | reference only |
 | [Skill & Plugin System](docs/skill-plugin-system.md) | Bundled skills registry, dynamic discovery | reference only |
-| [Prompt Caching & Keepalive](docs/prompt-caching.md) | Cache TTL, keepalive strategies | actionable |
+| [Prompt Caching & Keepalive](docs/prompt-caching.md) | Cache TTL, keepalive strategy caveats | actionable |
 | [Undocumented Features](docs/undocumented-features.md) | 88+ feature flags, hidden CLI flags, env vars | actionable |
 | [Anthropic-Only Commands](docs/ant-only-commands.md) | 24 commands gated behind `USER_TYPE=ant` | ⚠️ ant-only |
 | [Telemetry & Privacy Internals](docs/telemetry-privacy.md) | Datadog, BigQuery, OTLP endpoints | actionable |

@@ -1,641 +1,75 @@
 #requires -Version 5.1
 <#
 .SYNOPSIS
-    Claude Code Optimizer - Configuration Validation Suite (Windows)
-    Validates setup with optional headless hook testing
-
-.DESCRIPTION
-    Validates:
-    1. Claude Code installation
-    2. Dependencies (ImageMagick, pdftotext, markitdown, jq)
-    3. Privacy environment variables
-    4. Auto-compact configuration
-    5. Hook configuration (PreToolUse, PostToolUse)
-    6. Headless hook execution (optional with -TestHooks)
-
-.PARAMETER VerboseOutput
-    Show detailed output including full config file contents
-
-.PARAMETER TestHooks
-    Run headless hook tests (requires jq, API credits)
-
-.PARAMETER Help
-    Show help message
-
-.EXAMPLE
-    .\validate.ps1
-    Run configuration validation only
-
-.EXAMPLE
-    .\validate.ps1 -TestHooks
-    Run validation including headless hook tests
-
-.EXAMPLE
-    .\validate.ps1 -VerboseOutput
-    Run with detailed output
+  Validate optimizer state from ~/.claude/settings.json only.
 #>
 
 [CmdletBinding()]
 param(
-    [switch]$VerboseOutput,
-    [switch]$TestHooks
+  [ValidateSet('official','tuned')]
+  [string]$Profile,
+
+  [ValidateSet('standard','max')]
+  [string]$Privacy,
+
+  [switch]$ExpectUnsafe
 )
 
-# Colors
-$Colors = @{
-    Info = 'Cyan'
-    Success = 'Green'
-    Error = 'Red'
-    Warning = 'Yellow'
-    Header = 'Blue'
-    Metric = 'Magenta'
+$ErrorActionPreference = 'Stop'
+$SettingsFile = Join-Path $env:USERPROFILE '.claude\settings.json'
+$failed = 0
+
+function Pass([string]$name) { Write-Host "[PASS] $name" -ForegroundColor Green }
+function Fail([string]$name) { Write-Host "[FAIL] $name" -ForegroundColor Red; $script:failed++ }
+function Check([string]$name, [bool]$condition) { if ($condition) { Pass $name } else { Fail $name } }
+
+if (-not (Test-Path -LiteralPath $SettingsFile)) {
+  throw "Missing $SettingsFile"
 }
 
-# Configuration
-$ScriptDir = $PSScriptRoot
-$RepoDir = Join-Path $ScriptDir "..\.."
-$TestImage = Join-Path $RepoDir "tests\test-image.png"
-$TestPdf = Join-Path $RepoDir "tests\test-document.pdf"
-$ClaudeCmd = $null
+$settings = Get-Content -LiteralPath $SettingsFile -Raw | ConvertFrom-Json -AsHashtable
+$permissions = @{}
+if ($settings.ContainsKey('permissions') -and $settings['permissions'] -is [hashtable]) { $permissions = $settings['permissions'] }
+$hooks = @{}
+if ($settings.ContainsKey('hooks') -and $settings['hooks'] -is [hashtable]) { $hooks = $settings['hooks'] }
+$envMap = @{}
+if ($settings.ContainsKey('env') -and $settings['env'] -is [hashtable]) { $envMap = $settings['env'] }
 
-# Test counters
-$script:TestsPassed = 0
-$script:TestsFailed = 0
-$script:TestsSkipped = 0
+Check 'schema' ($settings.ContainsKey('$schema'))
+Check 'env_is_object' ($settings['env'] -is [hashtable])
+Check 'hooks_pretooluse' ($hooks.ContainsKey('PreToolUse'))
+Check 'hooks_sessionstart' ($hooks.ContainsKey('SessionStart'))
+Check 'permissions_deny' ($permissions.ContainsKey('deny'))
+Check 'has_disable_telemetry' ($envMap.ContainsKey('DISABLE_TELEMETRY') -and $envMap['DISABLE_TELEMETRY'] -eq '1')
 
-# Output functions
-function Write-Header {
-    param([string]$Message)
-    Write-Host ""
-    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor $Colors.Header
-    Write-Host " $Message" -ForegroundColor $Colors.Header
-    Write-Host "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" -ForegroundColor $Colors.Header
-    Write-Host ""
+if ($PSBoundParameters.ContainsKey('Privacy')) {
+  if ($Privacy -eq 'max') {
+    Check 'has_max_privacy_flag' ($envMap.ContainsKey('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC') -and $envMap['CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'] -eq '1')
+  } else {
+    Check 'has_max_privacy_flag' (-not $envMap.ContainsKey('CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC'))
+  }
 }
 
-function Write-Section {
-    param([string]$Message)
-    Write-Host ""
-    Write-Host $Message -Bold
-    Write-Host ('=' * $Message.Length) -ForegroundColor Blue
+if ($PSBoundParameters.ContainsKey('Profile')) {
+  if ($Profile -eq 'tuned') {
+    Check 'has_tuned_key' ($envMap.ContainsKey('CLAUDE_CODE_DISABLE_AUTO_MEMORY'))
+  } else {
+    Check 'has_tuned_key' (-not $envMap.ContainsKey('CLAUDE_CODE_DISABLE_AUTO_MEMORY'))
+  }
 }
 
-function Write-Status {
-    param([string]$Message)
-    Write-Host "[INFO] $Message" -ForegroundColor $Colors.Info
+$unsafeAllowPresent = $permissions.ContainsKey('allow') -and $permissions['allow'].Count -gt 0
+if ($ExpectUnsafe) {
+  Check 'unsafe_allow_present' $unsafeAllowPresent
+} else {
+  Check 'unsafe_allow_present' (-not $unsafeAllowPresent)
 }
 
-function Write-Success {
-    param([string]$Message)
-    Write-Host "[✓ PASS] $Message" -ForegroundColor $Colors.Success
-    $script:TestsPassed++
+$preToolUseJson = $hooks['PreToolUse'] | ConvertTo-Json -Depth 10
+Check 'pretooluse hook configured' ($preToolUseJson -match 'pretooluse')
+
+if ($failed -gt 0) {
+  throw "Validation failed: $failed checks failed."
 }
 
-function Write-Error {
-    param([string]$Message)
-    Write-Host "[✗ FAIL] $Message" -ForegroundColor $Colors.Error
-    $script:TestsFailed++
-}
-
-function Write-Warning {
-    param([string]$Message)
-    Write-Host "[⚠ SKIP] $Message" -ForegroundColor $Colors.Warning
-    $script:TestsSkipped++
-}
-
-function Write-Metric {
-    param([string]$Message)
-    Write-Host "[METRIC] $Message" -ForegroundColor $Colors.Metric
-}
-
-# Count tokens (rough approximation: chars / 4)
-function Count-Tokens {
-    param([string]$FilePath)
-    if (-not (Test-Path $FilePath)) { return 0 }
-    $chars = (Get-Item $FilePath).Length
-    return [math]::Floor($chars / 4)
-}
-
-# Find Claude binary
-function Find-Claude {
-    $paths = @(
-        (Get-Command claude -ErrorAction SilentlyContinue),
-        "$env:USERPROFILE\.local\bin\claude.exe",
-        "$env:LOCALAPPDATA\Programs\Claude\Claude.exe",
-        "$env:LOCALAPPDATA\claude\claude.exe",
-        "C:\Program Files\Claude\Claude.exe",
-        "C:\Program Files (x86)\Claude\Claude.exe"
-    )
-
-    foreach ($path in $paths) {
-        if ($path -and (Test-Path $path)) {
-            return $path
-        }
-    }
-    return $null
-}
-
-# Test 1: Check Claude Code installation
-function Test-ClaudeInstallation {
-    Write-Section "🔍 CLAUDE CODE INSTALLATION"
-
-    $script:ClaudeCmd = Find-Claude
-
-    if ($script:ClaudeCmd) {
-        $version = & $script:ClaudeCmd --version 2>&1 | Select-Object -First 1
-        Write-Success "Claude Code found: $version"
-        return $true
-    } else {
-        Write-Error "Claude Code not found"
-        Write-Status "Install from: https://claude.ai/code"
-        return $false
-    }
-}
-
-# Test 2: Check dependencies
-function Test-Dependencies {
-    Write-Section "📦 DEPENDENCIES"
-
-    # ImageMagick
-    $magick = Get-Command magick.exe -ErrorAction SilentlyContinue
-    $magickCmd = Get-Command magick -ErrorAction SilentlyContinue
-    $convert = Get-Command convert -ErrorAction SilentlyContinue
-    if ($magick -or $magickCmd -or $convert) {
-        $imgCmd = if ($magick) { "magick.exe" } elseif ($magickCmd) { "magick" } else { "convert" }
-        Write-Success "ImageMagick installed ($imgCmd)"
-    } else {
-        Write-Error "ImageMagick not found (required for image optimization)"
-        Write-Status "Install: winget install ImageMagick.Q16-HDRI"
-        Write-Status "        choco install imagemagick"
-    }
-
-    # pdftotext
-    $pdftotext = Get-Command pdftotext -ErrorAction SilentlyContinue
-    if ($pdftotext) {
-        Write-Success "pdftotext (poppler) installed"
-    } else {
-        Write-Error "pdftotext not found (required for PDF text extraction)"
-        Write-Status "Install: choco install poppler"
-        Write-Status "Download from: https://github.com/oschwartz10612/poppler-windows/releases"
-    }
-
-    # markitdown
-    $markitdownCmd = Get-Command markitdown -ErrorAction SilentlyContinue
-    $hasMarkitdown = $false
-    if ($markitdownCmd) {
-        $hasMarkitdown = $true
-    } else {
-        # Check as Python module (pip packages don't always create global executables on Windows)
-        try {
-            $null = & python -m markitdown --help 2>$null
-            $hasMarkitdown = $true
-        } catch {}
-    }
-    if ($hasMarkitdown) {
-        Write-Success "markitdown installed"
-    } else {
-        Write-Warning "markitdown not found (optional - for Office document conversion)"
-        Write-Status "Install: pip install markitdown"
-    }
-
-    # jq (for headless hook testing)
-    $jq = Get-Command jq -ErrorAction SilentlyContinue
-    if ($jq) {
-        Write-Success "jq installed (required for -TestHooks)"
-    } else {
-        if ($TestHooks) {
-            Write-Error "jq not found (required for -TestHooks)"
-            Write-Status "Install: winget install jqlang.jq"
-            Write-Status "        choco install jq"
-            $TestHooks = $false
-        } else {
-            Write-Warning "jq not found (install for -TestHooks capability)"
-        }
-    }
-}
-
-# Test 3: Check privacy configuration
-function Test-PrivacyConfiguration {
-    Write-Section "🔒 PRIVACY CONFIGURATION"
-
-    $privacyScore = 0
-    $vars = @(
-        @{ Name = "DISABLE_TELEMETRY"; Expected = "1"; Description = "Disable all telemetry" },
-        @{ Name = "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"; Expected = "1"; Description = "Block non-essential network traffic" },
-        @{ Name = "OTEL_LOG_USER_PROMPTS"; Expected = "0"; Description = "Don't log user prompts" },
-        @{ Name = "OTEL_LOG_TOOL_DETAILS"; Expected = "0"; Description = "Don't log tool details" }
-    )
-
-    foreach ($var in $vars) {
-        $actual = [Environment]::GetEnvironmentVariable($var.Name, "User")
-        if ($actual -eq $var.Expected) {
-            Write-Success "$($var.Name)=$actual ($($var.Description))"
-            $privacyScore++
-        } else {
-            Write-Error "$($var.Name) not set (expected: $($var.Expected), got: $actual)"
-            Write-Status "Set in PowerShell: [Environment]::SetEnvironmentVariable('$($var.Name)', '$($var.Expected)', 'User')"
-        }
-    }
-
-    # Auto-compact window
-    $autoCompactWindow = [Environment]::GetEnvironmentVariable("CLAUDE_CODE_AUTO_COMPACT_WINDOW", "User")
-    if ($autoCompactWindow -eq "180000") {
-        Write-Success "CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000 (3 minute compact window)"
-        $privacyScore++
-    } else {
-        Write-Error "CLAUDE_CODE_AUTO_COMPACT_WINDOW not set to 180000"
-        Write-Status "Set in PowerShell: [Environment]::SetEnvironmentVariable('CLAUDE_CODE_AUTO_COMPACT_WINDOW', '180000', 'User')"
-    }
-
-    Write-Host ""
-    Write-Metric "Privacy Score: $privacyScore/5"
-
-    if ($privacyScore -eq 5) {
-        Write-Success "Maximum privacy configured ✓"
-    } elseif ($privacyScore -ge 3) {
-        Write-Warning "Partial privacy ($privacyScore/5) - some protections active"
-    } else {
-        Write-Error "Privacy not configured - follow suggestions above"
-    }
-}
-
-# Test 3b: Check optimization variables
-function Test-OptimizationVariables {
-    Write-Section "⚡ OPTIMIZATION VARIABLES"
-
-    $optScore = 0
-    $vars = @(
-        @{ Name = "CLAUDE_CODE_DISABLE_AUTO_MEMORY"; Expected = "1"; Description = "Disable auto-memory extraction" },
-        @{ Name = "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE"; Expected = "80"; Description = "Compact at 80% threshold" }
-    )
-
-    foreach ($var in $vars) {
-        $actual = [Environment]::GetEnvironmentVariable($var.Name, "User")
-        if ($actual -eq $var.Expected) {
-            Write-Success "$($var.Name)=$actual ($($var.Description))"
-            $optScore++
-        } else {
-            Write-Error "$($var.Name) not set (expected: $($var.Expected), got: $actual)"
-            Write-Status "Set in PowerShell: [Environment]::SetEnvironmentVariable('$($var.Name)', '$($var.Expected)', 'User')"
-        }
-    }
-
-    # Boolean vars (true/1 both acceptable)
-    $boolVars = @(
-        @{ Name = "ENABLE_CLAUDE_CODE_SM_COMPACT"; Description = "Session-memory compaction" },
-        @{ Name = "DISABLE_INTERLEAVED_THINKING"; Description = "Disable interleaved thinking" },
-        @{ Name = "CLAUDE_CODE_DISABLE_ADVISOR_TOOL"; Description = "Disable advisor tool" },
-        @{ Name = "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS"; Description = "Disable git instructions" },
-        @{ Name = "CLAUDE_CODE_DISABLE_POLICY_SKILLS"; Description = "Disable policy skills" }
-    )
-
-    foreach ($var in $boolVars) {
-        $actual = [Environment]::GetEnvironmentVariable($var.Name, "User")
-        if ($actual -eq "true" -or $actual -eq "1") {
-            Write-Success "$($var.Name)=$actual ($($var.Description))"
-            $optScore++
-        } else {
-            Write-Error "$($var.Name) not set (expected: true/1, got: $actual)"
-            Write-Status "Set in PowerShell: [Environment]::SetEnvironmentVariable('$($var.Name)', 'true', 'User')"
-        }
-    }
-
-    Write-Host ""
-    Write-Metric "Optimization Score: $optScore/7"
-
-    if ($optScore -eq 7) {
-        Write-Success "All optimizations configured ✓"
-    } elseif ($optScore -ge 4) {
-        Write-Warning "Partial optimizations ($optScore/7) - some token savings active"
-    } else {
-        Write-Error "Optimizations not configured - follow suggestions above"
-    }
-}
-
-# Test 4: Check auto-compact configuration
-function Test-AutoCompact {
-    Write-Section "⚙️  AUTO-COMPACT CONFIGURATION"
-
-    $claudeConfig = Join-Path $env:USERPROFILE ".claude\.claude.json"
-
-    if (-not (Test-Path $claudeConfig)) {
-        Write-Error "Claude config not found: $claudeConfig"
-        Write-Status "Run optimize-claude.ps1 to create this file"
-        return
-    }
-
-    $configContent = Get-Content $claudeConfig -Raw -ErrorAction SilentlyContinue
-    if ($configContent -match '"autoCompactEnabled":\s*true') {
-        Write-Success "autoCompactEnabled: true"
-    } else {
-        Write-Error "autoCompactEnabled not set to true"
-        Write-Status "Run optimize-claude.ps1 or manually edit $claudeConfig"
-    }
-
-    # Check attribution settings (saves ~50-100 tokens per commit/PR)
-    if ($configContent -match '"attribution"') {
-        if ($configContent -match '"commit":\s*""' -and $configContent -match '"pr":\s*""') {
-            Write-Success "attribution: commit and pr set to empty (saves ~50-100 tokens)"
-        } else {
-            Write-Warning "attribution found but may not be empty strings"
-        }
-    } else {
-        Write-Warning "attribution not configured (optional, saves ~50-100 tokens per commit/PR)"
-    }
-
-    if ($VerboseOutput) {
-        Write-Host ""
-        Write-Status "Current config contents:"
-        $configContent
-    }
-}
-
-# Test 5: Check hook configuration
-function Test-HookConfiguration {
-    Write-Section "🪝 HOOK CONFIGURATION"
-
-    $userSettings = Join-Path $env:USERPROFILE ".claude\settings.json"
-    $projectSettings = Join-Path $RepoDir ".claude\settings.json"
-
-    $settingsFile = $null
-    if (Test-Path $userSettings) {
-        $settingsFile = $userSettings
-    } elseif (Test-Path $projectSettings) {
-        $settingsFile = $projectSettings
-    }
-
-    if (-not $settingsFile) {
-        Write-Error "settings.json not found"
-        Write-Status "Checked locations:"
-        Write-Status "  - $userSettings"
-        Write-Status "  - $projectSettings"
-        Write-Status "Run optimize-claude.ps1 to configure hooks"
-        return
-    }
-
-    $settingsContent = Get-Content $settingsFile -Raw
-
-    $preConfigured = $false
-    $postConfigured = $false
-
-    if ($settingsContent -match '"PreToolUse"') {
-        Write-Success "PreToolUse hook configured"
-        $preConfigured = $true
-    } else {
-        Write-Error "PreToolUse hook not configured"
-        Write-Status "This hook auto-resizes images before Claude processes them"
-    }
-
-    if ($settingsContent -match '"PostToolUse"') {
-        Write-Success "PostToolUse hook configured"
-        $postConfigured = $true
-    } else {
-        Write-Error "PostToolUse hook not configured"
-        Write-Status "This hook keeps the prompt cache warm (saves 90% on cache misses)"
-    }
-
-    if ($VerboseOutput) {
-        Write-Host ""
-        Write-Status "Current hooks configuration:"
-        $settingsContent
-    }
-}
-
-# Test 6: Headless hook execution
-function Test-HooksHeadless {
-    Write-Section "🧪 HEADLESS HOOK TESTING"
-
-    if (-not $TestHooks) {
-        Write-Warning "Skipped (use -TestHooks to enable)"
-        return
-    }
-
-    if (-not $script:ClaudeCmd) {
-        Write-Error "Claude not found, cannot run headless tests"
-        return
-    }
-
-    Write-Status "Running headless hook test (costs ~`$0.01-0.02 in API credits)..."
-    Write-Status "Command: claude -p --output-format stream-json --include-hook-events --allowedTools 'Read'"
-
-    # Create test image if needed
-    $testImage = $TestImage
-    if (-not (Test-Path $testImage)) {
-        Write-Warning "Test image not found at $testImage"
-        Write-Status "Creating a simple test image..."
-        $testImage = "$env:TEMP\validate-test.png"
-
-        $magickExe = Get-Command magick.exe -ErrorAction SilentlyContinue
-        $magick = Get-Command magick -ErrorAction SilentlyContinue
-        $convert = Get-Command convert -ErrorAction SilentlyContinue
-
-        if ($magickExe) {
-            & $magickExe -size 2500x2500 xc:blue $testImage 2>$null
-        } elseif ($magick) {
-            & $magick -size 2500x2500 xc:blue $testImage 2>$null
-        } elseif ($convert) {
-            & $convert -size 2500x2500 xc:blue $testImage 2>$null
-        }
-
-        if (-not (Test-Path $testImage)) {
-            Write-Warning "Could not create test image, skipping headless test"
-            return
-        }
-    }
-
-    # Convert to WSL path if needed
-    $wslImage = $testImage
-    if ($testImage -match '^[A-Z]:') {
-        $drive = $testImage[0].ToString().ToLower()
-        $path = $testImage.Substring(2).Replace('\', '/')
-        $wslImage = "/mnt/$drive$path"
-    }
-
-    $outputFile = "$env:TEMP\claude-hook-test-$PID.jsonl"
-
-    Write-Status "Executing: Read $wslImage"
-
-    # Run Claude in headless mode with hook events
-    # Note: --include-hook-events requires --verbose flag
-    # Prompt must be passed via stdin for -p mode
-    "Read $wslImage" | & $script:ClaudeCmd -p `
-        --output-format stream-json `
-        --verbose `
-        --include-hook-events `
-        --allowedTools "Read" 2>&1 | Out-File -FilePath $outputFile -Encoding UTF8
-
-    $exitCode = $LASTEXITCODE
-
-    # Parse results
-    if (Test-Path $outputFile) {
-        $content = Get-Content $outputFile -Raw
-        $lines = $content -split "`n" | Where-Object { $_.Trim() }
-
-        $preCount = 0
-        $postCount = 0
-        $hookEvents = @()
-
-        foreach ($line in $lines) {
-            try {
-                $json = $line | ConvertFrom-Json -ErrorAction SilentlyContinue
-                # Hook events have type="system" with subtype="hook_started" or "hook_response"
-                if ($json.type -eq "system" -and $json.subtype -match "^hook_") {
-                    $hookEvents += "$($json.hook_name):$($json.hook_event)"
-                    if ($json.hook_name -eq "PreToolUse:Read") { $preCount++ }
-                    if ($json.hook_name -eq "PostToolUse:Read") { $postCount++ }
-                }
-            } catch {}
-        }
-
-        if ($preCount -gt 0) {
-            $msg = "PreToolUse hook fired (" + $preCount + " times)"
-            Write-Success $msg
-        } else {
-            Write-Error "PreToolUse hook did not fire"
-            if ($VerboseOutput) {
-                Write-Status "Hook events found:"
-                $hookEvents | ForEach-Object { Write-Status "  $_" }
-            }
-        }
-
-        if ($postCount -gt 0) {
-            $msg = "PostToolUse hook fired (" + $postCount + " times)"
-            Write-Success $msg
-        } else {
-            Write-Error "PostToolUse hook did not fire"
-        }
-
-        # Check for resized image evidence (hook creates /tmp/claude-resize-* then copies back)
-        # Check the hook log for resize confirmation since temp file is cleaned up
-        $resizeEvidence = wsl grep -c "RESIZED" /tmp/claude-hook-validation.log 2>$null
-        $wslCheck = wsl ls /tmp/claude-resize-*.png 2>$null
-        if ($resizeEvidence -or $wslCheck) {
-            Write-Success "Image resizing hook executed (resize confirmed in logs)"
-        } else {
-            Write-Warning "Resized image not found in WSL /tmp (hook may have run but output path differs)"
-        }
-
-        # Show usage if available
-        foreach ($line in $lines) {
-            try {
-                $json = $line | ConvertFrom-Json -ErrorAction SilentlyContinue
-                if ($json.type -eq "result" -and $json.usage) {
-                    $u = $json.usage
-                    $usage = "Input: $($u.input_tokens), Output: $($u.output_tokens), Cache: $($u.cache_creation_tokens)/$($u.cache_read_tokens)"
-                    Write-Metric "API Usage: $usage"
-                    break
-                }
-            } catch {}
-        }
-    } else {
-        Write-Error "No output captured from headless test"
-    }
-
-    # Cleanup
-    Remove-Item $outputFile -ErrorAction SilentlyContinue
-
-    if ($exitCode -ne 0) {
-        Write-Warning "Claude exited with code $exitCode (may indicate API error or rate limit)"
-    }
-}
-
-# Print manual test instructions
-function Write-ManualTests {
-    Write-Header "🧪 MANUAL HOOK VERIFICATION (Fallback)"
-
-    $wslRepoDir = wsl wslpath -a "$RepoDir" 2>$null
-    if (-not $wslRepoDir) {
-        $wslRepoDir = "/mnt/c" + ($RepoDir -replace '^C:', '').Replace('\', '/')
-    }
-
-    Write-Host "If headless testing failed or was skipped, verify hooks manually:"
-    Write-Host ""
-
-    Write-Host "Test 1: PreToolUse Hook (Image Processing)" -Bold
-    Write-Host "1. Start an interactive Claude session: claude"
-    Write-Host "2. Run this command inside Claude:"
-    Write-Host "   Read $TestImage" -ForegroundColor $Colors.Info
-    Write-Host "3. Check if the image was resized:"
-    Write-Host "   wsl ls -la /tmp/claude-resize-*.png" -ForegroundColor $Colors.Info
-    Write-Host "4. Expected: A resized image file should exist (~33% smaller)"
-    Write-Host ""
-
-    Write-Host "Test 2: PostToolUse Hook (Cache Keepalive)" -Bold
-    Write-Host "1. In the same Claude session, run:"
-    Write-Host "   ls" -ForegroundColor $Colors.Info
-    Write-Host "2. Check the hook log:"
-    Write-Host "   wsl cat /tmp/cache-keepalive.log" -ForegroundColor $Colors.Info
-    Write-Host "3. Expected: Log entries showing 'keepalive' timestamps"
-    Write-Host "4. The hook fires every ~4 minutes to keep the 5-minute cache alive"
-    Write-Host ""
-
-    Write-Host "Test 3: PDF Text Extraction" -Bold
-    Write-Host "1. Extract text from the test PDF:"
-    Write-Host "   pdftotext -layout `"$TestPdf`" C:\temp\extracted.txt" -ForegroundColor $Colors.Info
-    Write-Host "2. Compare sizes:"
-    Write-Host "   dir `"$TestPdf`" C:\temp\extracted.txt" -ForegroundColor $Colors.Info
-    Write-Host "3. Run inside Claude:"
-    Write-Host "   Read C:\temp\extracted.txt" -ForegroundColor $Colors.Info
-    Write-Host "4. Expected: Text file is ~10x smaller than binary PDF"
-    Write-Host ""
-
-    Write-Host "Note: If you don't have the test files, download them:" -ForegroundColor $Colors.Warning
-    Write-Host "   wget -O tests/test-document.pdf https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf" -ForegroundColor $Colors.Info
-}
-
-# Generate final report
-function Write-Report {
-    Write-Header "📊 VALIDATION SUMMARY"
-
-    Write-Host "Test Results: Passed: $script:TestsPassed | Failed: $script:TestsFailed | Skipped: $script:TestsSkipped"
-    Write-Host ""
-
-    $allConfigsOk = $script:TestsFailed -eq 0
-
-    if ($allConfigsOk) {
-        Write-Success "ALL CONFIGURATIONS VALID ✓"
-        Write-Host ""
-        Write-Host "Your Claude Code environment is properly configured:"
-        Write-Host "  • Dependencies installed"
-        Write-Host "  • Privacy settings active"
-        Write-Host "  • Auto-compact enabled"
-        Write-Host "  • Hooks configured"
-        if ($TestHooks) {
-            Write-Host "  • Hooks tested in headless mode"
-        }
-        Write-Host ""
-        if (-not $TestHooks) {
-            Write-Host "Next step: Run with -TestHooks to verify hook execution" -ForegroundColor $Colors.Warning
-        }
-    } else {
-        Write-Error "CONFIGURATION INCOMPLETE"
-        Write-Host ""
-        Write-Host "Some optimizations are not configured."
-        Write-Host "Review the errors above and run optimize-claude.ps1 to fix."
-    }
-
-    Write-Host ""
-    Write-Host "Quick Commands:" -Bold
-    Write-Host "  Run optimizer:  .\scripts\windows\optimize-claude.ps1"
-    Write-Host "  Debug mode:     .\scripts\windows\validate.ps1 -VerboseOutput"
-    Write-Host "  Test hooks:     .\scripts\windows\validate.ps1 -TestHooks"
-
-    if ($allConfigsOk) {
-        exit 0
-    } else {
-        exit 1
-    }
-}
-
-# Main
-Write-Header "Claude Code Optimizer - Configuration Validation"
-
-Test-ClaudeInstallation
-Test-Dependencies
-Test-PrivacyConfiguration
-Test-OptimizationVariables
-Test-AutoCompact
-Test-HookConfiguration
-Test-HooksHeadless
-Write-ManualTests
-Write-Report
+Write-Host 'Validation passed.' -ForegroundColor Green

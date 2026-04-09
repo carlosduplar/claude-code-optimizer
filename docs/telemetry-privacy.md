@@ -326,7 +326,7 @@ export OTEL_METRICS_INCLUDE_ACCOUNT_UUID=true
    export -p | grep -E '(DISABLE_TELEMETRY|NONENTIAL)'
    ```
 
-2. Check for config file overrides in `~/.claude.json`
+2. Check for config file overrides in `~/.claude/settings.json`
 
 3. Restart claude completely (env vars set at startup)
 
