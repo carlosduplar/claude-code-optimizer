@@ -22,7 +22,7 @@ Usage: validate.sh [options]
 Options:
   --profile official|tuned   Validate expected profile behavior
   --privacy standard|max     Validate expected privacy behavior
-  --expect-unsafe            Assert broad Bash allowlist is present
+  --expect-unsafe            Assert unsafe high-risk Bash patterns are present
   --help                     Show this help
 EOF
 }

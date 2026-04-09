@@ -29,7 +29,7 @@ cp claude-code-optimizer/CLAUDE.md ./CLAUDE.md
 | Profile | Purpose |
 |---------|---------|
 | `official` | Official-docs-aligned baseline defaults |
-| `tuned` | Official baseline + reverse-engineered tuning overlay |
+| `tuned` | Adds BASH_MAX_OUTPUT_LENGTH, SM_COMPACT, AUTOCOMPACT_PCT_OVERRIDE=80; disables auto-memory, advisor, git instructions, policy skills |
 
 `tuned` is the default profile.
 
@@ -37,10 +37,10 @@ cp claude-code-optimizer/CLAUDE.md ./CLAUDE.md
 
 | Technique | Mechanism | Measured Impact |
 |-----------|-----------|-----------------|
-| Keepalive guidance | SessionStart reminder (manual `/loop`) | Avoids false hook-based keepalive assumptions |
+| CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80 | Proactive context compaction before 13K-token buffer | Reduces reactive compactions |
 | Binary preprocessing | markitdown conversion before API call | 50-80% token reduction on binary files |
 | Compact CLAUDE.md | Compressed behavioral anchors | ~45% reduction on session-start input |
-| experimentalSystemReminder | Per-turn style injection | Eliminates style drift, no per-turn CLAUDE.md reload |
+| experimentalSystemReminder | Per-turn style injection | ⚠️ unverified |
 | Telemetry blocking | Disables Datadog/BigQuery/OTLP endpoints | Reduces non-essential outbound traffic |
 
 *Cache savings only realized on hit; binary savings depend on file type.*
@@ -55,7 +55,7 @@ All optimizer-managed runtime configuration is written to `~/.claude/settings.js
 |------|--------|---------|
 | `--profile` | `official` or `tuned` | `tuned` |
 | `--privacy` | `standard` or `max` | `max` |
-| `--unsafe-auto-approve` | enable broad Bash allowlist | off |
+| `--unsafe-auto-approve` | ⚠️ enable broad Bash allowlist | off |
 | `--auto-format` | enable post-edit format hook | off |
 | `--dry-run` | preview without writes | off |
 | `--skip-deps` | skip dependency checks | off |
@@ -83,7 +83,7 @@ All optimizer-managed runtime configuration is written to `~/.claude/settings.js
 | `DISABLE_INTERLEAVED_THINKING` | Interleaved thinking | `false` |
 | `DISABLE_PROMPT_CACHING` | All prompt caching | `false` |
 | `DISABLE_TELEMETRY` | Telemetry | `false` |
-| `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | Compact threshold (percentage) | `80` |
+| `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | Compact threshold (percentage) | `80` (set) |
 
 **Internal / Anthropic-only** (⚠️ ant-only — requires `USER_TYPE=ant`)
 
@@ -100,6 +100,13 @@ See [CLAUDE.md](CLAUDE.md). Contains compressed behavioral anchors for communica
 ### Keepalive
 
 The project no longer claims PostToolUse-hook keepalive behavior. Keepalive is reminder-based (`SessionStart`) and manual (`/loop`) by design.
+
+### Hook Runtime Verification
+
+Use runtime checks (not only config checks) to confirm hook events are firing:
+
+- Linux/macOS/WSL: `./scripts/linux/test-hooks-runtime.sh`
+- Windows: `.\scripts\windows\test-hooks-runtime.ps1`
 
 ### Bash Auto-Approve Defaults
 

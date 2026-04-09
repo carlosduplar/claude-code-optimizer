@@ -1,4 +1,4 @@
-#requires -Version 5.1
+#requires -Version 7.0
 <#
 .SYNOPSIS
   Claude Code optimizer (official baseline + tuned overlay)
@@ -129,7 +129,7 @@ $patterns = @(
   '\.env$', '\.env\.', '\.git\\|\.git/', '\.ssh\\|\.ssh/', 'id_rsa', 'id_ed25519', '\.pem$', '\.key$', 'credentials\.json$', 'secrets\.'
 )
 
-function Matches([string]$value) {
+function Test-ProtectedPath([string]$value) {
   if (-not $value) { return $false }
   foreach ($p in $patterns) {
     if ($value -match $p) { return $true }
@@ -149,7 +149,7 @@ function IsOutsideProject([string]$pathValue) {
 }
 
 if ($toolName -in @('Write','Edit','MultiEdit')) {
-  if (Matches $filePath) {
+  if (Test-ProtectedPath $filePath) {
     [Console]::Error.WriteLine("BLOCKED: path '$filePath' matches protected pattern")
     exit 2
   }
@@ -159,7 +159,7 @@ if ($toolName -in @('Write','Edit','MultiEdit')) {
   }
 }
 
-if ($toolName -eq 'Bash' -and (Matches $command)) {
+if ($toolName -eq 'Bash' -and (Test-ProtectedPath $command)) {
   [Console]::Error.WriteLine('BLOCKED: bash command references protected path/pattern')
   exit 2
 }
@@ -169,8 +169,8 @@ if ($toolName -eq 'Bash' -and $command -match '^\s*(cat|head|tail|grep|rg|find|G
     [Console]::Error.WriteLine('BLOCKED: path traversal is blocked for high-risk read commands')
     exit 2
   }
-  $matches = [regex]::Matches($command, '(~?[\\/][^ ;|&]+|\.{1,2}[\\/][^ ;|&]+)')
-  foreach ($m in $matches) {
+  $pathMatches = [regex]::Matches($command, '(~?[\\/][^ ;|&]+|\.{1,2}[\\/][^ ;|&]+)')
+  foreach ($m in $pathMatches) {
     if (IsOutsideProject $m.Value) {
       [Console]::Error.WriteLine("BLOCKED: high-risk read command target outside workspace: '$($m.Value)'")
       exit 2
@@ -178,12 +178,6 @@ if ($toolName -eq 'Bash' -and $command -match '^\s*(cat|head|tail|grep|rg|find|G
   }
 }
 
-exit 0
-'@
-
-  $postToolUse = @'
-param()
-# Intentionally lightweight; no fake cache keepalive behavior.
 exit 0
 '@
 
@@ -196,7 +190,6 @@ exit 0
   $hooks = @{
     'pretooluse.ps1' = $preToolUse
     'file-guard.ps1' = $fileGuard
-    'posttooluse.ps1' = $postToolUse
     'session-start-reminder.ps1' = $sessionStartReminder
   }
 
@@ -284,32 +277,29 @@ function Get-RenderedSettings {
       PreToolUse = @(
         @{
           matcher = 'Read'
-          hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& '$HooksDir\pretooluse.ps1'"; timeout = 30 })
+          hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\pretooluse.ps1')"; timeout = 30 })
         },
         @{
           matcher = 'Write|Edit|MultiEdit|Bash'
-          hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& '$HooksDir\file-guard.ps1'"; timeout = 10 })
-        }
-      )
-      PostToolUse = @(
-        @{
-          matcher = '*'
-          hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& '$HooksDir\posttooluse.ps1'"; timeout = 5 })
+          hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\file-guard.ps1')"; timeout = 10 })
         }
       )
       SessionStart = @(
         @{
           matcher = 'startup|resume'
-          hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& '$HooksDir\session-start-reminder.ps1'"; timeout = 5 })
+          hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\session-start-reminder.ps1')"; timeout = 5 })
         }
       )
     }
   }
 
   if ($AutoFormat) {
+    if (-not $settings.hooks.ContainsKey('PostToolUse')) {
+      $settings.hooks['PostToolUse'] = @()
+    }
     $settings.hooks.PostToolUse += @{
       matcher = 'Write|Edit|MultiEdit'
-      hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& '$HooksDir\post-edit-format.ps1'"; timeout = 30 })
+      hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\post-edit-format.ps1')"; timeout = 30 })
     }
   }
 
@@ -333,6 +323,8 @@ function Merge-Hashtable([hashtable]$Base, [hashtable]$Incoming) {
   foreach ($k in $Incoming.Keys) {
     if ($merged.ContainsKey($k) -and $merged[$k] -is [hashtable] -and $Incoming[$k] -is [hashtable]) {
       $merged[$k] = Merge-Hashtable -Base $merged[$k] -Incoming $Incoming[$k]
+    } elseif ($merged.ContainsKey($k) -and $merged[$k] -is [array] -and $Incoming[$k] -is [array]) {
+      $merged[$k] = @($merged[$k]) + @($Incoming[$k]) | Select-Object -Unique
     } else {
       $merged[$k] = $Incoming[$k]
     }
