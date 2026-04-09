@@ -85,26 +85,40 @@ For a 200K context window, this is the difference between:
 
 ## Keepalive Strategies
 
-### Strategy 1: Hook-Based Keepalive (Recommended)
+### Why PostToolUse Is the Wrong Hook for Keepalive
 
-Add to your `settings.json`:
+A common mistake is adding a `PostToolUse` hook that echoes a keepalive signal:
 
 ```json
 {
   "hooks": {
     "PostToolUse": [{
       "matcher": "*",
-      "hooks": [{
-        "type": "command",
-        "command": "echo '{\"keepalive\": \"'$(date +%s)'\"}'",
-        "if": "*"
-      }]
+      "hooks": [{"type": "command", "command": "echo '{\"keepalive\": \"...\"}'"}]
     }]
   }
 }
 ```
 
-**Limitation:** Only fires when tools are used. If you're thinking/reading for >5 minutes, cache may still expire.
+**This does nothing for cache TTL.** The problem: cache expires during **user idle time**, not between tool calls. If tools are firing, the session is already active—no keepalive is needed. If you're reading/thinking for 5+ minutes without tool use, the cache expires regardless of this hook.
+
+### Strategy 1: Background Timer (Recommended)
+
+The most reliable keepalive runs independently of Claude Code activity:
+
+**Linux/macOS/WSL:**
+```bash
+# Run in background before starting your session
+while sleep 240; do claude -p "." --no-stream 2>/dev/null; done &
+```
+
+**PowerShell:**
+```powershell
+# Start in background
+Start-Job { while ($true) { Start-Sleep 240; claude -p "." 2>$null } }
+```
+
+This sends a minimal ping every 4 minutes regardless of what you're doing.
 
 ### Strategy 2: Claude Code `/loop` Command
 
@@ -226,23 +240,55 @@ Look for:
 
 ---
 
-## Hook: Auto-Keepalive on Idle
+## Hook: Idle Warning with File-Based Timestamps
 
-**For settings.json:**
+**Note:** `$CLAUDE_LAST_ACTIVITY` does not exist in Claude Code. Use a file-based approach instead.
 
+Track last activity by writing timestamps on each tool use, then check in PreSampling:
+
+**Linux/macOS/WSL:**
 ```json
 {
   "hooks": {
+    "PostToolUse": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "date +%s > /tmp/claude_last_activity",
+        "if": "*"
+      }]
+    }],
     "PreSampling": [{
       "type": "command",
-      "command": "if [ $(($(date +%s) - ${CLAUDE_LAST_ACTIVITY:-0})) -gt 240 ]; then echo '{\"warning\": \"Cache may expire soon - 5min idle approaching\"}'; fi",
+      "command": "[ $(($(date +%s) - $(cat /tmp/claude_last_activity 2>/dev/null || echo 0))) -gt 240 ] && echo '{\"warning\": \"Cache TTL risk - 4+ min idle\"}'",
       "if": "*"
     }]
   }
 }
 ```
 
-This warns you when approaching the 5-minute idle threshold.
+**PowerShell:**
+```json
+{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "*",
+      "hooks": [{
+        "type": "command",
+        "command": "[DateTimeOffset]::UtcNow.ToUnixTimeSeconds() | Out-File \"$env:TEMP/claude_last_activity.txt\" -NoNewline",
+        "if": "*"
+      }]
+    }],
+    "PreSampling": [{
+      "type": "command",
+      "command": "$ts = if (Test-Path \"$env:TEMP/claude_last_activity.txt\") { Get-Content \"$env:TEMP/claude_last_activity.txt\" } else { 0 }; if (([DateTimeOffset]::UtcNow.ToUnixTimeSeconds() - $ts) -gt 240) { Write-Host '{\"warning\": \"Cache TTL risk - 4+ min idle\"}' }",
+      "if": "*"
+    }]
+  }
+}
+```
+
+**Limitations:** This only tracks tool-based activity. Pure thinking/reading time without tool use will still cause cache expiry.
 
 ---
 
@@ -252,7 +298,7 @@ This warns you when approaching the 5-minute idle threshold.
 |----------|----------------|--------|
 | **Batch by model** | Do all Haiku work first, then switch | High |
 | **Stable thinking config** | Set once at session start | High |
-| **Keepalive ping** | Background script every 4min | Medium |
+| **Keepalive ping** | Background timer or `/loop` every 4min | Medium |
 | **Pre-warm cache** | Small request after breaks | Medium |
 | **Minimize system changes** | Configure MCP servers before starting | High |
 | **Use `/loop`** | For long-running monitoring tasks | Low |

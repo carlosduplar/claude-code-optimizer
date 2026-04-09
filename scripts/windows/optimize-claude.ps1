@@ -1442,7 +1442,8 @@ function New-ClaudeMdTemplate {
     $claudeMd = Join-Path $claudeDir "CLAUDE.md"
 
     # Concise content for CAVEMAN mode
-    $cavemanContent = @'---
+    $cavemanContent = @'
+---
 ## Communication
 No articles, filler, pleasantries, hedging, preamble, postamble, tool announce, step narrate.
 Execute first, explain only if asked. One sentence per concept.
