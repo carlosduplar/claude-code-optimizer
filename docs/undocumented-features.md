@@ -616,6 +616,8 @@ experimentalSystemReminder?: string  // Re-injected every turn
 
 **Purpose:** Keep agent focused on specific behavior throughout long conversations.
 
+**Documentation:** [docs/experimental-system-reminder.md](experimental-system-reminder.md)
+
 ---
 
 ## Summary

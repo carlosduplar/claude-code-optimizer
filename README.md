@@ -34,6 +34,7 @@ This repository documents **obscure, undocumented, and internal** aspects of Cla
 | [Optimization Scripts](docs/optimization-scripts.md) | Automated setup scripts for token efficiency and privacy configuration |
 | [Validation](docs/validation.md) | Functional testing to verify hooks work correctly |
 | [Token Benchmark](tests/benchmark/README.md) | Token measurement test suite for optimization validation |
+| [experimentalSystemReminder](docs/experimental-system-reminder.md) | Per-turn system prompt injection for long-session consistency |
 | [Legal Notice](docs/LEGAL.md) | Legal disclaimer and copyright notice |
 
 **Tested Environments:**
