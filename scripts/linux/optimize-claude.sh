@@ -306,6 +306,54 @@ HOOKEOF
   success "Hook scripts updated"
 }
 
+write_output_style() {
+  local OUTPUT_STYLES_DIR="${CLAUDE_DIR}/output-styles"
+  local CAVEMAN_PATH="${OUTPUT_STYLES_DIR}/caveman.md"
+
+  if $DRY_RUN; then
+    info "[dry-run] would write caveman output style to ${CAVEMAN_PATH}"
+    return
+  fi
+
+  mkdir -p "$OUTPUT_STYLES_DIR"
+
+  cat > "$CAVEMAN_PATH" <<'STYLEEOF'
+---
+name: Caveman
+description: Ultra-compact communication mode with ~75% token reduction
+keep-coding-instructions: true
+---
+
+# Caveman Mode
+
+No articles, filler, pleasantries, hedging, preamble, postamble, tool announce, step narrate.
+Execute first, explain only if asked. One sentence per concept.
+Pattern: [thing] [action] [reason]. [next step].
+Use arrows for causality: X → Y.
+
+## Abbreviations
+DB=database, auth=authentication, config=configuration, req=request, res=response,
+fn=function, impl=implementation, var=variable, param=parameter, init=initialize,
+err=error, dbg=debug, ctx=context, ref=reference, api=API, cli=CLI
+
+## Rules
+- Fragments OK. Short synonyms.
+- Technical terms exact. Code blocks unchanged. Errors quoted exact.
+- Git commits, PRs: normal.
+- Auto-revert to normal mode for: security warnings, irreversible actions, multi-step sequences where fragment order risks misread.
+
+## Examples
+
+User: "How do I connect to the database?"
+Response: `psql $DB_URL` → connects Postgres. Need URL? Check `.env`.
+
+User: "Fix the auth bug"
+Response: `Read auth.ts`. Missing token validation. Adding check. `Edit auth.ts:validateToken()`.
+STYLEEOF
+
+  success "Installed caveman output style to ${CAVEMAN_PATH}"
+}
+
 render_settings_json() {
   python3 - <<'PY'
 import json, os
@@ -335,6 +383,7 @@ unsafe_allow = [
 settings = {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "attribution": {"commit": "", "pr": ""},
+  "outputStyle": "caveman",
   "env": {},
   "permissions": {
     "allow": list(default_allow),
@@ -580,6 +629,7 @@ main() {
 
   check_deps
   write_hook_scripts
+  write_output_style
 
   export OPT_PROFILE="$PROFILE"
   export OPT_PRIVACY="$PRIVACY"

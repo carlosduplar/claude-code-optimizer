@@ -575,6 +575,7 @@ function Get-RenderedSettings {
   $settings = @{
     '$schema' = 'https://json.schemastore.org/claude-code-settings.json'
     attribution = @{ commit = ''; pr = '' }
+    outputStyle = 'caveman'
     env = $envVars
     permissions = @{
       allow = @(Get-DefaultAllowPatterns)
@@ -707,6 +708,54 @@ function Merge-Settings([hashtable]$Existing, [hashtable]$Rendered) {
   return $merged
 }
 
+function Write-OutputStyle {
+  $outputStylesDir = Join-Path $ClaudeDir 'output-styles'
+  $cavemanPath = Join-Path $outputStylesDir 'caveman.md'
+
+  $cavemanContent = @'
+---
+name: Caveman
+description: Ultra-compact communication mode with ~75% token reduction
+keep-coding-instructions: true
+---
+
+# Caveman Mode
+
+No articles, filler, pleasantries, hedging, preamble, postamble, tool announce, step narrate.
+Execute first, explain only if asked. One sentence per concept.
+Pattern: [thing] [action] [reason]. [next step].
+Use arrows for causality: X → Y.
+
+## Abbreviations
+DB=database, auth=authentication, config=configuration, req=request, res=response,
+fn=function, impl=implementation, var=variable, param=parameter, init=initialize,
+err=error, dbg=debug, ctx=context, ref=reference, api=API, cli=CLI
+
+## Rules
+- Fragments OK. Short synonyms.
+- Technical terms exact. Code blocks unchanged. Errors quoted exact.
+- Git commits, PRs: normal.
+- Auto-revert to normal mode for: security warnings, irreversible actions, multi-step sequences where fragment order risks misread.
+
+## Examples
+
+User: "How do I connect to the database?"
+Response: `psql $DB_URL` → connects Postgres. Need URL? Check `.env`.
+
+User: "Fix the auth bug"
+Response: `Read auth.ts`. Missing token validation. Adding check. `Edit auth.ts:validateToken()`.
+'@
+
+  if ($DryRun) {
+    Write-Info "[dry-run] would write caveman output style to $cavemanPath"
+    return
+  }
+
+  New-Item -ItemType Directory -Force -Path $outputStylesDir | Out-Null
+  Set-Content -LiteralPath $cavemanPath -Value $cavemanContent -Encoding utf8
+  Write-Ok "Installed caveman output style to $cavemanPath"
+}
+
 function Write-ClaudeMd {
   $src = Join-Path $PSScriptRoot '..\..\CLAUDE.md'
   if (-not (Test-Path -LiteralPath $src)) {
@@ -778,6 +827,7 @@ try {
 
   Test-Dependencies
   Write-Hooks
+  Write-OutputStyle
   Write-ClaudeMd
   Write-Settings
   if ($UnsafeAutoApprove) {

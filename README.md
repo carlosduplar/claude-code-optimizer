@@ -112,6 +112,18 @@ See [CLAUDE.md](CLAUDE.md). Contains compressed behavioral anchors for communica
 | `PostToolUseFailure` | After any tool fails | Logs errors to `~/.claude/logs/errors/` with 1MB rotation | `posttoolusefailure.sh/ps1` |
 | `Notification` | When notification sent | Desktop toast (Windows) or `notify-send` (Linux); fallback to stderr | `notify.sh/ps1` |
 
+### Caveman Output Style
+
+Default communication mode installed as custom [output style](https://code.claude.com/docs/en/output-styles) at `~/.claude/output-styles/caveman.md`:
+
+- ~75% token reduction via telegraphic speech
+- Pattern: `[thing] [action] [reason]. [next step].`
+- Causality arrows: `X → Y`
+- Abbreviations: DB=database, auth=authentication, fn=function, impl=implementation, etc.
+- Auto-reverts to normal mode for security warnings and irreversible actions
+
+Set via `"outputStyle": "caveman"` in settings.json. Takes effect on next session start.
+
 ### Keepalive
 
 Keepalive is reminder-based (`SessionStart`) and manual (`/loop`) by design.
