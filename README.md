@@ -56,7 +56,7 @@ All optimizer-managed runtime configuration is written to `~/.claude/settings.js
 | `--profile` | `official` or `tuned` | `tuned` |
 | `--privacy` | `standard` or `max` | `max` |
 | `--unsafe-auto-approve` | ⚠️ enable broad Bash allowlist | off |
-| `--auto-format` | enable post-edit format hook | off |
+| `--auto-format` | enable post-edit format hook | **on** |
 | `--dry-run` | preview without writes | off |
 | `--skip-deps` | skip dependency checks | off |
 | `--verify` | validate current settings only | off |
@@ -99,11 +99,22 @@ All optimizer-managed runtime configuration is written to `~/.claude/settings.js
 
 See [CLAUDE.md](CLAUDE.md). Contains compressed behavioral anchors for communication style, principles, workflow, and documentation. Copy to project root for ~45% session-start reduction.
 
+### Implemented Hooks
+
+| Hook | Event | What It Does | Script |
+|------|-------|--------------|--------|
+| `SessionStart` | Session startup/resume | Displays keepalive reminder (`/loop` if >5m idle) + project context | `session-start-reminder.sh/ps1` |
+| `PreToolUse` (Read) | Before Read tool | Sanity check for Read operations | `pretooluse.sh/ps1` |
+| `PreToolUse` (Write/Edit/Bash) | Before write/bash | **bash-guard**: Blocks dangerous commands (sudo, rm -rf /, curl \| bash, etc.) | `bash-guard.sh/ps1` |
+| `PreToolUse` (Write/Edit/Bash) | Before write/bash | **write-guard**: Blocks commits of secrets (API keys, tokens, private keys) to non-example files | `write-guard.sh/ps1` |
+| `PreToolUse` (Write/Edit/Bash) | Before write/bash | **file-guard**: Additional file validation | `file-guard.ps1` (Windows only) |
+| `PostToolUse` | After Write/Edit/MultiEdit | Auto-format files (prettier for JS/TS/CSS/HTML/JSON/YAML; black/autopep8 for Python) | `post-edit-format.sh/ps1` |
+| `PostToolUseFailure` | After any tool fails | Logs errors to `~/.claude/logs/errors/` with 1MB rotation | `posttoolusefailure.sh/ps1` |
+| `Notification` | When notification sent | Desktop toast (Windows) or `notify-send` (Linux); fallback to stderr | `notify.sh/ps1` |
+
 ### Keepalive
 
-The project no longer claims PostToolUse-hook keepalive behavior. Keepalive is reminder-based (`SessionStart`) and manual (`/loop`) by design.
-
-Default optimizer runs do not add `PostToolUse`; that hook is only added when auto-format is enabled.
+Keepalive is reminder-based (`SessionStart`) and manual (`/loop`) by design.
 
 ### Hook Runtime Verification
 

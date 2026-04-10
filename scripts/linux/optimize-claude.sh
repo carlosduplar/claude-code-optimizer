@@ -268,7 +268,16 @@ HOOKEOF
 
   cat > "${HOOKS_DIR}/notify.sh" <<'HOOKEOF'
 #!/usr/bin/env bash
-# Notification hook - minimal, just acknowledges
+# Notification hook - uses notify-send or writes to stderr on failure
+set -euo pipefail
+input="$(cat)"
+msg="$(echo "$input" | jq -r '.message // empty')"
+[[ -z "$msg" ]] && exit 0
+if command -v notify-send >/dev/null 2>&1; then
+  notify-send "Claude Code" "$msg" || echo "Notification failed: notify-send error" >&2
+else
+  echo "[Notification] $msg" >&2
+fi
 exit 0
 HOOKEOF
 
@@ -378,19 +387,17 @@ settings = {
           {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/notify.sh", "timeout": 15}
         ]
       }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit|MultiEdit",
+        "hooks": [
+          {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/post-edit-format.sh", "timeout": 30}
+        ]
+      }
     ]
   },
 }
-
-if auto_format:
-  settings["hooks"]["PostToolUse"] = [
-    {
-      "matcher": "Write|Edit|MultiEdit",
-      "hooks": [
-        {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/post-edit-format.sh", "timeout": 30}
-      ]
-    }
-  ]
 
 # official baseline
 settings["env"]["DISABLE_TELEMETRY"] = "1"
