@@ -707,6 +707,25 @@ function Merge-Settings([hashtable]$Existing, [hashtable]$Rendered) {
   return $merged
 }
 
+function Write-ClaudeMd {
+  $src = Join-Path $PSScriptRoot '..\..\CLAUDE.md'
+  if (-not (Test-Path -LiteralPath $src)) {
+    Write-Warn "CLAUDE.md not found at $src — skipping"
+    return
+  }
+
+  $dest = Join-Path $ClaudeDir 'CLAUDE.md'
+
+  if ($DryRun) {
+    Write-Info "[dry-run] would copy CLAUDE.md to $dest"
+    return
+  }
+
+  New-Item -ItemType Directory -Force -Path $ClaudeDir | Out-Null
+  Copy-Item -LiteralPath $src -Destination $dest -Force
+  Write-Ok "Installed CLAUDE.md to $dest"
+}
+
 function Write-Settings {
   $rendered = Get-RenderedSettings
 
@@ -759,6 +778,7 @@ try {
 
   Test-Dependencies
   Write-Hooks
+  Write-ClaudeMd
   Write-Settings
   if ($UnsafeAutoApprove) {
     Write-Warn 'Unsafe auto-approve is enabled. This broad allowlist is high-risk.'
