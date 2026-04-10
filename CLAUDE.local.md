@@ -11,7 +11,8 @@ The `raw/` directory contains a local mirror of all Claude Code documentation. M
 1. **Identify the relevant docs**: Look in `raw/en/` for the feature area you're modifying
 2. **Read the documentation**: Use the Read tool on relevant markdown files in `raw/`
 3. **Verify your approach**: Ensure your implementation matches documented behavior
-4. **Then implement**: Only after confirming with official docs
+4. **Label confidence**: Tag all technical claims as HIGH/MEDIUM/LOW/UNKNOWN per CLAUDE.md
+5. **Then implement**: Only after confirming with official docs
 
 ## Common Doc Locations
 

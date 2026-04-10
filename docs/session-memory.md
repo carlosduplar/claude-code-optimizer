@@ -684,4 +684,43 @@ Claude Code's context management is a sophisticated multi-layer system:
 
 ---
 
+## MCP Token Limits
+
+**Variable:** `MAX_MCP_OUTPUT_TOKENS`
+**Default:** No limit (unbounded)
+**Recommended:** `25000` (set by optimizer `tuned` profile)
+
+### Purpose
+Prevents large MCP (Model Context Protocol) server responses from saturating the context window. While CLI tools are generally preferred over MCP for efficiency (CLI output can be truncated/managed), some workflows require MCP. This limit caps MCP output to protect context space.
+
+### When to Use
+- MCP servers return large payloads (database queries, file listings)
+- Frequent MCP tool use in sessions
+- Context window filling faster than expected
+
+### Comparison: CLI vs MCP
+
+| Aspect | CLI (Bash tool) | MCP |
+|--------|----------------|-----|
+| Output control | `BASH_MAX_OUTPUT_LENGTH` truncates | `MAX_MCP_OUTPUT_TOKENS` caps |
+| Preprocessing | Hook-based (images, PDFs) | Limited |
+| Startup cost | None | Server initialization |
+| Flexibility | Direct shell commands | Structured schemas |
+
+**Recommendation:** Prefer CLI tools when possible. Use MCP only when structured APIs are required, and always with `MAX_MCP_OUTPUT_TOKENS` set.
+
+### Configuration
+
+Set in `~/.claude/.env` or shell profile:
+```bash
+export MAX_MCP_OUTPUT_TOKENS=25000
+```
+
+Or via optimizer:
+```bash
+./optimize-claude.sh --profile tuned  # Sets automatically
+```
+
+---
+
 *based on alleged Claude Code source analysis (src/services/compact/, src/services/SessionMemory/, src/memdir/)*

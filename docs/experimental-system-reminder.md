@@ -91,6 +91,32 @@ Test for style drift across long conversations:
 
 ---
 
+## Experimental Agent Teams
+
+**Variable:** `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`
+**Status:** Unverified in public builds — may be dead-code eliminated.
+
+Enables multi-instance parallel collaboration with direct agent-to-agent communication. When set to `1`, multiple Agent tool invocations can run concurrently with message passing between them.
+
+**Use cases:**
+- Parallel brainstorming across domain experts (security, performance, testing)
+- Concurrent file analysis across multiple directories
+- Multi-agent consensus building
+
+**Set by optimizer:** `tuned` profile automatically enables this flag.
+
+**Environment configuration:**
+```bash
+export CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1
+```
+
+**Limitations:**
+- Requires explicit Agent tool use with parallel invocation
+- No guarantee of availability in public builds
+- Agent-to-agent message format undocumented
+
+---
+
 ## Related
 
 - [CLAUDE.md communication rules](https://code.claude.com/docs/en/) — session-start conventions

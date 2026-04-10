@@ -83,6 +83,12 @@ write_hook_scripts() {
 
   mkdir -p "$HOOKS_DIR"
 
+  # Copy hooks from script directory
+  local SCRIPT_HOOKS_DIR="${SCRIPT_DIR}/hooks"
+  if [[ -d "$SCRIPT_HOOKS_DIR" ]]; then
+    cp "$SCRIPT_HOOKS_DIR"/*.sh "$HOOKS_DIR/" 2>/dev/null || true
+  fi
+
   cat > "${HOOKS_DIR}/pretooluse.sh" <<'HOOKEOF'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -225,7 +231,62 @@ HOOKEOF
 
   cat > "${HOOKS_DIR}/posttooluse.sh" <<'HOOKEOF'
 #!/usr/bin/env bash
-# Intentionally lightweight; no fake cache keepalive behavior.
+# PostToolUse: Deterministic formatting after Write/Edit
+set -euo pipefail
+
+input="$(cat)"
+tool_name="$(echo "$input" | jq -r '.tool_name // empty')"
+file_path="$(echo "$input" | jq -r '.tool_input.file_path // .tool_input.filePath // empty')"
+
+# Only process Write/Edit tools
+[[ "$tool_name" != "Write" && "$tool_name" != "Edit" && "$tool_name" != "MultiEdit" ]] && exit 0
+[[ -z "$file_path" || ! -f "$file_path" ]] && exit 0
+
+ext="${file_path##*.}"
+ext="$(echo "$ext" | tr '[:upper:]' '[:lower:]')"
+
+# Non-blocking: format if tools available, ignore errors
+case "$ext" in
+  py)
+    if command -v ruff >/dev/null 2>&1; then
+      ruff format "$file_path" 2>/dev/null || true
+    elif command -v black >/dev/null 2>&1; then
+      black --quiet "$file_path" 2>/dev/null || true
+    fi
+    ;;
+  js|jsx|ts|tsx|json|jsonc|css|scss|less|html|htm|md|markdown|yaml|yml)
+    if command -v prettier >/dev/null 2>&1; then
+      prettier --write "$file_path" 2>/dev/null || true
+    fi
+    ;;
+esac
+
+exit 0
+HOOKEOF
+
+  cat > "${HOOKS_DIR}/posttoolusefailure.sh" <<'HOOKEOF'
+#!/usr/bin/env bash
+# PostToolUseFailure: Log errors with 1MB rotation
+set -euo pipefail
+
+LOG_DIR="${HOME}/.claude/logs/errors"
+mkdir -p "$LOG_DIR"
+
+DATE=$(date +%Y-%m-%d)
+LOG_FILE="${LOG_DIR}/${DATE}.log"
+
+# Rotate if > 1MB
+if [[ -f "$LOG_FILE" && $(stat -f%z "$LOG_FILE" 2>/dev/null || stat -c%s "$LOG_FILE" 2>/dev/null || echo 0) -gt 1048576 ]]; then
+  mv "$LOG_FILE" "${LOG_DIR}/${DATE}-1.log"
+fi
+
+input="$(cat)"
+tool_name="$(echo "$input" | jq -r '.tool_name // empty')"
+error="$(echo "$input" | jq -r '.error // empty')"
+
+TIMESTAMP=$(date -Iseconds)
+echo "[${TIMESTAMP}] [${tool_name}] ${error}" >> "$LOG_FILE"
+
 exit 0
 HOOKEOF
 
@@ -281,9 +342,17 @@ settings = {
       "Bash(Get-ChildItem *)", "Bash(gci *)",
       "Bash(pwd)", "Bash(Get-Location)", "Bash(gl)",
       "Bash(which *)", "Bash(where *)", "Bash(Get-Command *)", "Bash(gcm *)",
-      "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git branch*)", "Bash(git stash list*)",
+      "Bash(git status*)", "Bash(git log*)", "Bash(git diff*)", "Bash(git branch*)", "Bash(git stash list*)", "Bash(git remote*)", "Bash(git config*)",
       "Bash(npm list*)", "Bash(pip list*)", "Bash(pip show*)", "Bash(pip freeze*)", "Bash(Get-Package*)",
-      "Bash(*--version)", "Bash(* -v)", "Bash(*--help*)"
+      "Bash(grep *)", "Bash(rg *)", "Bash(find . -*)" ,
+      "Bash(echo *)", "Bash(printenv *)", "Bash(env | *)",
+      "Bash(ps *)", "Bash(top -n *)", "Bash(htop -n *)",
+      "Bash(curl -I *)", "Bash(curl --head *)", "Bash(ping -c *)", "Bash(nslookup *)", "Bash(dig *)",
+      "Bash(mkdir *)" , "Bash(rmdir *)", "Bash(touch *)", "Bash(mv *)", "Bash(cp *)",
+      "Bash(*--version)", "Bash(* -v)", "Bash(*--help*)",
+      "Bash(make *)" , "Bash(cmake *)", "Bash(npm run *)", "Bash(yarn *)", "Bash(pnpm *)",
+      "Bash(tsc *)" , "Bash(eslint *)", "Bash(prettier *)", "Bash(ruff *)", "Bash(black *)",
+      "Bash(docker ps *)", "Bash(docker images *)", "Bash(docker-compose ps *)"
     ],
     "deny": [
       "Read(./.env)",
@@ -305,7 +374,9 @@ settings = {
       {
         "matcher": "Write|Edit|MultiEdit|Bash",
         "hooks": [
-          {"type": "command", "command": f"bash {hooks_dir}/file-guard.sh", "timeout": 10}
+          {"type": "command", "command": f"bash {hooks_dir}/file-guard.sh", "timeout": 10},
+          {"type": "command", "command": f"bash {hooks_dir}/bash-guard.sh", "timeout": 5},
+          {"type": "command", "command": f"bash {hooks_dir}/write-guard.sh", "timeout": 5},
         ],
       },
     ],
@@ -314,6 +385,14 @@ settings = {
         "matcher": "*",
         "hooks": [
           {"type": "command", "command": f"bash {hooks_dir}/posttooluse.sh", "timeout": 5}
+        ],
+      }
+    ],
+    "PostToolUseFailure": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "command": f"bash {hooks_dir}/posttoolusefailure.sh", "timeout": 5}
         ],
       }
     ],
@@ -358,6 +437,8 @@ if profile == "tuned":
       "CLAUDE_CODE_DISABLE_POLICY_SKILLS": "true",
       "OTEL_LOG_USER_PROMPTS": "0",
       "OTEL_LOG_TOOL_DETAILS": "0",
+      "MAX_MCP_OUTPUT_TOKENS": "25000",
+      "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
     }
   )
 

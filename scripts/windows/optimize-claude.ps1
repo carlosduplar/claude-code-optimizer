@@ -49,6 +49,14 @@ function Write-Hooks {
 
   New-Item -ItemType Directory -Force -Path $HooksDir | Out-Null
 
+  # Copy external hooks from script directory
+  $ScriptHooksDir = Join-Path $PSScriptRoot 'hooks'
+  if (Test-Path -LiteralPath $ScriptHooksDir) {
+    Get-ChildItem -LiteralPath $ScriptHooksDir -Filter '*.ps1' | ForEach-Object {
+      Copy-Item -LiteralPath $_.FullName -Destination $HooksDir -Force
+    }
+  }
+
   $preToolUse = @'
 param()
 $ErrorActionPreference = 'Stop'
@@ -187,10 +195,38 @@ Write-Output 'Keepalive reminder: if you expect >5m idle periods, run /loop manu
 exit 0
 '@
 
+  $postToolUseFailure = @'
+param()
+$ErrorActionPreference = 'Stop'
+$LOG_DIR = Join-Path $env:USERPROFILE '.claude\logs\errors'
+New-Item -ItemType Directory -Force -Path $LOG_DIR | Out-Null
+
+$DATE = Get-Date -Format 'yyyy-MM-dd'
+$LOG_FILE = Join-Path $LOG_DIR "$DATE.log"
+
+# Rotate if > 1MB
+if (Test-Path -LiteralPath $LOG_FILE) {
+  $size = (Get-Item -LiteralPath $LOG_FILE).Length
+  if ($size -gt 1048576) {
+    Move-Item -LiteralPath $LOG_FILE -Destination (Join-Path $LOG_DIR "$DATE-1.log") -Force
+  }
+}
+
+$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$toolName = $payload.tool_name
+$errorMsg = $payload.error
+
+$TIMESTAMP = Get-Date -Format 'o'
+"[$TIMESTAMP] [$toolName] $errorMsg" | Out-File -FilePath $LOG_FILE -Encoding utf8 -Append
+
+exit 0
+'@
+
   $hooks = @{
     'pretooluse.ps1' = $preToolUse
     'file-guard.ps1' = $fileGuard
     'session-start-reminder.ps1' = $sessionStartReminder
+    'posttoolusefailure.ps1' = $postToolUseFailure
   }
 
   if ($AutoFormat) {
@@ -248,6 +284,8 @@ function Get-RenderedSettings {
     $envVars['CLAUDE_CODE_DISABLE_POLICY_SKILLS'] = 'true'
     $envVars['OTEL_LOG_USER_PROMPTS'] = '0'
     $envVars['OTEL_LOG_TOOL_DETAILS'] = '0'
+    $envVars['MAX_MCP_OUTPUT_TOKENS'] = '25000'
+    $envVars['CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS'] = '1'
   }
 
   $settings = @{
@@ -260,9 +298,17 @@ function Get-RenderedSettings {
         'Bash(Get-ChildItem *)','Bash(gci *)',
         'Bash(pwd)','Bash(Get-Location)','Bash(gl)',
         'Bash(which *)','Bash(where *)','Bash(Get-Command *)','Bash(gcm *)',
-        'Bash(git status*)','Bash(git log*)','Bash(git diff*)','Bash(git branch*)','Bash(git stash list*)',
+        'Bash(git status*)','Bash(git log*)','Bash(git diff*)','Bash(git branch*)','Bash(git stash list*)','Bash(git remote*)','Bash(git config*)',
         'Bash(npm list*)','Bash(pip list*)','Bash(pip show*)','Bash(pip freeze*)','Bash(Get-Package*)',
-        'Bash(*--version)','Bash(* -v)','Bash(*--help*)'
+        'Bash(grep *)','Bash(rg *)','Bash(find . -*)',
+        'Bash(echo *)','Bash(printenv *)','Bash(env | *)',
+        'Bash(ps *)','Bash(top -n *)','Bash(htop -n *)',
+        'Bash(curl -I *)','Bash(curl --head *)','Bash(ping -c *)','Bash(nslookup *)','Bash(dig *)',
+        'Bash(mkdir *)','Bash(rmdir *)','Bash(touch *)','Bash(mv *)','Bash(cp *)',
+        'Bash(*--version)','Bash(* -v)','Bash(*--help*)',
+        'Bash(make *)','Bash(cmake *)','Bash(npm run *)','Bash(yarn *)','Bash(pnpm *)',
+        'Bash(tsc *)','Bash(eslint *)','Bash(prettier *)','Bash(ruff *)','Bash(black *)',
+        'Bash(docker ps *)','Bash(docker images *)','Bash(docker-compose ps *)'
       )
       deny = @(
         'Read(./.env)',
@@ -281,13 +327,23 @@ function Get-RenderedSettings {
         },
         @{
           matcher = 'Write|Edit|MultiEdit|Bash'
-          hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\file-guard.ps1')"; timeout = 10 })
+          hooks = @(
+            @{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\file-guard.ps1')"; timeout = 10 }
+            @{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\bash-guard.ps1')"; timeout = 5 }
+            @{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\write-guard.ps1')"; timeout = 5 }
+          )
         }
       )
       SessionStart = @(
         @{
           matcher = 'startup|resume'
           hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\session-start-reminder.ps1')"; timeout = 5 })
+        }
+      )
+      PostToolUseFailure = @(
+        @{
+          matcher = '*'
+          hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\posttoolusefailure.ps1')"; timeout = 5 })
         }
       )
     }

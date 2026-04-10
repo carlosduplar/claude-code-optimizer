@@ -10,6 +10,14 @@ Git commits, PRs: normal.
 KISS. YAGNI. DRY. No emojis in code or comments.
 Check updated docs before architecture/dependency/tool decisions. Use context7 if available.
 
+## Verification Protocol
+BEFORE any API/library/framework answer: Context7 FIRST. No exceptions.
+Confidence levels required on all technical claims:
+- HIGH: Verified against official docs or source code
+- MEDIUM: Inferred from patterns, may need verification
+- LOW: Reasonable assumption, unverified
+- UNKNOWN: Cannot determine, user must verify
+
 ## Workflow
 Make smallest correct change. After edits: run linter/tests if available.
 File >500 lines: use offset+limit. Search before full read.
