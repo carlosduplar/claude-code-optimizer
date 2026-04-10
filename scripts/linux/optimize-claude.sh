@@ -297,6 +297,12 @@ echo "Keepalive reminder: if you expect >5m idle periods, run /loop manually."
 exit 0
 HOOKEOF
 
+  cat > "${HOOKS_DIR}/notify.sh" <<'HOOKEOF'
+#!/usr/bin/env bash
+# Notification hook - minimal, just acknowledges
+exit 0
+HOOKEOF
+
   if $AUTO_FORMAT; then
     cat > "${HOOKS_DIR}/post-edit-format.sh" <<'HOOKEOF'
 #!/usr/bin/env bash
@@ -360,7 +366,7 @@ settings = {
       "Read(./secrets/**)",
       "Edit(./.env)",
       "Edit(./.env.*)",
-      "Edit(./secrets/**)",
+      "Edit(./secrets/**)"
     ]
   },
   "hooks": {
@@ -368,42 +374,50 @@ settings = {
       {
         "matcher": "Read",
         "hooks": [
-          {"type": "command", "command": f"bash {hooks_dir}/pretooluse.sh", "timeout": 30}
-        ],
+          {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/pretooluse.sh", "timeout": 30}
+        ]
       },
       {
         "matcher": "Write|Edit|MultiEdit|Bash",
         "hooks": [
-          {"type": "command", "command": f"bash {hooks_dir}/file-guard.sh", "timeout": 10},
-          {"type": "command", "command": f"bash {hooks_dir}/bash-guard.sh", "timeout": 5},
-          {"type": "command", "command": f"bash {hooks_dir}/write-guard.sh", "timeout": 5},
-        ],
-      },
+          {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/file-guard.sh", "timeout": 10},
+          {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/bash-guard.sh", "timeout": 5},
+          {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/write-guard.sh", "timeout": 5}
+        ]
+      }
     ],
     "PostToolUse": [
       {
         "matcher": "*",
         "hooks": [
-          {"type": "command", "command": f"bash {hooks_dir}/posttooluse.sh", "timeout": 5}
-        ],
+          {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/posttooluse.sh", "timeout": 5}
+        ]
       }
     ],
     "PostToolUseFailure": [
       {
         "matcher": "*",
         "hooks": [
-          {"type": "command", "command": f"bash {hooks_dir}/posttoolusefailure.sh", "timeout": 5}
-        ],
+          {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/posttoolusefailure.sh", "timeout": 5}
+        ]
       }
     ],
     "SessionStart": [
       {
         "matcher": "startup|resume",
         "hooks": [
-          {"type": "command", "command": f"bash {hooks_dir}/session-start-reminder.sh", "timeout": 5}
-        ],
+          {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/session-start-reminder.sh", "timeout": 5}
+        ]
       }
     ],
+    "Notification": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/notify.sh", "timeout": 15}
+        ]
+      }
+    ]
   },
 }
 
@@ -412,8 +426,8 @@ if auto_format:
     {
       "matcher": "Write|Edit|MultiEdit",
       "hooks": [
-        {"type": "command", "command": f"bash {hooks_dir}/post-edit-format.sh", "timeout": 30}
-      ],
+        {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/post-edit-format.sh", "timeout": 30}
+      ]
     }
   )
 

@@ -222,11 +222,147 @@ $TIMESTAMP = Get-Date -Format 'o'
 exit 0
 '@
 
+  $bashGuard = @'
+param()
+$ErrorActionPreference = 'Stop'
+
+trap {
+  [Console]::Error.WriteLine('BLOCKED: bash-guard validation error (fail-closed)')
+  exit 1
+}
+
+$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$toolName = $payload.tool_name
+$command = $payload.tool_input.command
+
+if ($toolName -ne 'Bash' -or -not $command) { exit 0 }
+
+# Dangerous command patterns
+$denyPatterns = @(
+  '^\s*sudo\b'
+  '\brm\s+-rf\s+/\s*$'
+  '\brm\s+-rf\s+/\*\s*$'
+  '\beval\s+'
+  '\bcurl\s+.*\|.*\b(bash|sh)\b'
+  '\bwget\s+.*\|.*\b(bash|sh)\b'
+  '\bcurl\s+.*\|.*\b(bash|sh)\s*-\s*c\b'
+  '\s*>\s*/dev/sda\s*$'
+  ':\(\)\s*\{\s*:\|:&\s*\};\s*:'
+  '\bdd\s+if=.*of=/dev/sd[a-z]'
+  '\bmkfs\.[a-z]+\s+/dev/sd[a-z][0-9]*'
+  '\b>:\(\)\{\s*:\|:&\s*\};\s*:'
+)
+
+foreach ($pattern in $denyPatterns) {
+  if ($command -match $pattern) {
+    [Console]::Error.WriteLine("BLOCKED: command matches dangerous pattern: $pattern")
+    exit 2
+  }
+}
+
+exit 0
+'@
+
+  $writeGuard = @'
+param()
+$ErrorActionPreference = 'Stop'
+
+trap {
+  [Console]::Error.WriteLine('BLOCKED: write-guard validation error (fail-closed)')
+  exit 1
+}
+
+$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$toolName = $payload.tool_name
+$filePath = $payload.tool_input.file_path
+if (-not $filePath) { $filePath = $payload.tool_input.filePath }
+
+if ($toolName -notin @('Write','Edit','MultiEdit')) { exit 0 }
+if (-not $filePath) { exit 0 }
+
+# Allow safe files (examples, tests, fixtures)
+$allowedPatterns = @(
+  '\.env\.example$'
+  '\.env\.sample$'
+  '\.env\.template$'
+  '\.env\.local\.example$'
+  '\.test\.[a-z]+$'
+  '\.spec\.[a-z]+$'
+  '_test\.[a-z]+$'
+  '_spec\.[a-z]+$'
+  'test/'
+  'tests/'
+  '__tests__/'
+  'fixtures/'
+  'examples/'
+  '\.md$'
+)
+
+foreach ($pattern in $allowedPatterns) {
+  if ($filePath -match $pattern) { exit 0 }
+}
+
+# Get content for Write tool
+$content = ''
+if ($toolName -eq 'Write') {
+  $content = $payload.tool_input.content
+}
+
+# For Edit tool, check old/new strings
+if ($toolName -in @('Edit','MultiEdit')) {
+  $content = "$($payload.tool_input.oldString) $($payload.tool_input.newString)"
+}
+
+if (-not $content) { exit 0 }
+
+# Secret detection patterns
+$secretPatterns = @(
+  '(?i)password\s*=\s*["'''][^"''"\n]{4,}["''']'
+  '(?i)passwd\s*=\s*["'''][^"''"\n]{4,}["''']'
+  '(?i)api[_-]?key\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)apikey\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)secret[_-]?key\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)secret\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)auth[_-]?token\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)access[_-]?token\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)token\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)private[_-]?key\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----'
+  '(?i)aws[_-]?access[_-]?key[_-]?id\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)aws[_-]?secret[_-]?access[_-]?key\s*=\s*["'''][^"''"\n]{8,}["''']'
+  'AKIA[0-9A-Z]{16}'
+  '(?i)github[_-]?token\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)slack[_-]?token\s*=\s*["'''][^"''"\n]{8,}["''']'
+  'xox[baprs]-[0-9a-zA-Z]{10,48}'
+  '(?i)database[_-]?url\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)connection[_-]?string\s*=\s*["'''][^"''"\n]{8,}["''']'
+)
+
+foreach ($pattern in $secretPatterns) {
+  if ($content -match $pattern) {
+    [Console]::Error.WriteLine('BLOCKED: suspected secret detected in write content (pattern: credential)')
+    [Console]::Error.WriteLine('If this is intentional, write to .env.example or use placeholder values')
+    exit 2
+  }
+}
+
+exit 0
+'@
+
+  $notifyHook = @'
+param()
+# Notification hook - minimal, just acknowledges
+exit 0
+'@
+
   $hooks = @{
     'pretooluse.ps1' = $preToolUse
     'file-guard.ps1' = $fileGuard
     'session-start-reminder.ps1' = $sessionStartReminder
     'posttoolusefailure.ps1' = $postToolUseFailure
+    'bash-guard.ps1' = $bashGuard
+    'write-guard.ps1' = $writeGuard
+    'notify.ps1' = $notifyHook
   }
 
   if ($AutoFormat) {
@@ -323,27 +459,33 @@ function Get-RenderedSettings {
       PreToolUse = @(
         @{
           matcher = 'Read'
-          hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\pretooluse.ps1')"; timeout = 30 })
-        },
+          hooks = @(@{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\pretooluse.ps1'')'; timeout = 30 })
+        }
         @{
           matcher = 'Write|Edit|MultiEdit|Bash'
           hooks = @(
-            @{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\file-guard.ps1')"; timeout = 10 }
-            @{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\bash-guard.ps1')"; timeout = 5 }
-            @{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\write-guard.ps1')"; timeout = 5 }
+            @{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\file-guard.ps1'')'; timeout = 10 }
+            @{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\bash-guard.ps1'')'; timeout = 5 }
+            @{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\write-guard.ps1'')'; timeout = 5 }
           )
         }
       )
       SessionStart = @(
         @{
           matcher = 'startup|resume'
-          hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\session-start-reminder.ps1')"; timeout = 5 })
+          hooks = @(@{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\session-start-reminder.ps1'')'; timeout = 5 })
         }
       )
       PostToolUseFailure = @(
         @{
           matcher = '*'
-          hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\posttoolusefailure.ps1')"; timeout = 5 })
+          hooks = @(@{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\posttoolusefailure.ps1'')'; timeout = 5 })
+        }
+      )
+      Notification = @(
+        @{
+          matcher = '*'
+          hooks = @(@{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\notify.ps1'')'; timeout = 15 })
         }
       )
     }
@@ -355,7 +497,7 @@ function Get-RenderedSettings {
     }
     $settings.hooks.PostToolUse += @{
       matcher = 'Write|Edit|MultiEdit'
-      hooks = @(@{ type = 'command'; shell = 'powershell'; command = "& (Join-Path $env:USERPROFILE '.claude\\hooks\\post-edit-format.ps1')"; timeout = 30 })
+      hooks = @(@{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\post-edit-format.ps1'')'; timeout = 30 })
     }
   }
 
