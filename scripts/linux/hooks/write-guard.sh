@@ -43,37 +43,12 @@ if [[ "$tool_name" == "Write" ]]; then
   content="$(echo "$input" | jq -r '.tool_input.content // empty')"
 fi
 
-# For Edit tool, we'd need to read the old file and apply patches
-# This is a simplified check that only validates the patch content
+# For Edit tool, check the patch content
 if [[ "$tool_name" == "Edit" || "$tool_name" == "MultiEdit" ]]; then
-  # Check edit-related fields for potential secrets
   content="$(echo "$input" | jq -r '.tool_input.oldString // .tool_input.newString // empty')"
 fi
 
 [[ -z "$content" ]] && exit 0
-
-# Secret detection patterns
-secret_patterns=(
-  '(?i)password\s*=\s*["'\'''][^"'\''"\n]{4,}["'\''']'
-  '(?i)passwd\s*=\s*["'\'''][^"'\''"\n]{4,}["'\''']'
-  '(?i)api[_-]?key\s*=\s*["'\'''][^"'\''"\n]{8,}["'\''']'
-  '(?i)apikey\s*=\s*["'\'''][^"'\''"\n]{8,}["'\''']'
-  '(?i)secret[_-]?key\s*=\s*["'\'''][^"'\''"\n]{8,}["'\''']'
-  '(?i)secret\s*=\s*["'\'''][^"'\''"\n]{8,}["'\''']'
-  '(?i)auth[_-]?token\s*=\s*["'\'''][^"'\''"\n]{8,}["'\''']'
-  '(?i)access[_-]?token\s*=\s*["'\'''][^"'\''"\n]{8,}["'\''']'
-  '(?i)token\s*=\s*["'\'''][^"'\''"\n]{8,}["'\''']'
-  '(?i)private[_-]?key\s*=\s*["'\'''][^"'\''"\n]{8,}["'\''']'
-  '-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----'
-  '(?i)aws[_-]?access[_-]?key[_-]?id\s*=\s*["'\'''][^"'\''"\n]{8,}["'\''']'
-  '(?i)aws[_-]?secret[_-]?access[_-]?key\s*=\s*["'\'''][^"'\''"\n]{8,}["'\''']'
-  'AKIA[0-9A-Z]{16}'
-  '(?i)github[_-]?token\s*=\s*["'\'''][^"'\''"\n]{8,}["'\''']'
-  '(?i)slack[_-]?token\s*=\s*["'\'''][^"'\''"\n]{8,}["'\''']'
-  'xox[baprs]-[0-9a-zA-Z]{10,48}'
-  '(?i)database[_-]?url\s*=\s*["'\'''][^"'\''"\n]{8,}["'\''']'
-  '(?i)connection[_-]?string\s*=\s*["'\'''][^"'\''"\n]{8,}["'\''']'
-)
 
 block() {
   local reason="$1"
@@ -82,10 +57,39 @@ block() {
   exit 2
 }
 
-for pattern in "${secret_patterns[@]}"; do
-  if echo "$content" | grep -qiP "$pattern" 2>/dev/null; then
-    block "suspected secret detected in write content (pattern: credential)"
+# Check for secrets using simple grep (no complex regex)
+check_patterns=(
+  'api[_-]?key[[:space:]]*='
+  'apikey[[:space:]]*='
+  'secret[_-]?key[[:space:]]*='
+  'secret[[:space:]]*='
+  'password[[:space:]]*='
+  'passwd[[:space:]]*='
+  'auth[_-]?token[[:space:]]*='
+  'access[_-]?token[[:space:]]*='
+  'private[_-]?key[[:space:]]*='
+  'database[_-]?url[[:space:]]*='
+  'connection[_-]?string[[:space:]]*='
+  'github[_-]?token[[:space:]]='
+  'slack[_-]?token[[:space:]]='
+  'AKIA[0-9A-Z]'
+  'xox[baprs]-'
+  'BEGIN.*PRIVATE KEY'
+)
+
+for pattern in "${check_patterns[@]}"; do
+  if echo "$content" | grep -qiE "$pattern" 2>/dev/null; then
+    block "suspected secret detected in write content (pattern: $pattern)"
   fi
 done
+
+# Check for values that look like secrets (high entropy after = sign)
+if echo "$content" | grep -qiE '=[[:space:]]*["'"'"']?[a-zA-Z0-9_]{20,}["'"'"']?' 2>/dev/null; then
+  # Verify it's not a common safe value
+  safe_value='(true|false|null|undefined|example|placeholder|test|demo)'
+  if ! echo "$content" | grep -qiE "=$safe_value" 2>/dev/null; then
+    block "suspected secret value detected (high-entropy string after =)"
+  fi
+fi
 
 exit 0
