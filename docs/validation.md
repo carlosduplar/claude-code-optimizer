@@ -43,7 +43,7 @@ Runtime test validates:
 
 - `PreToolUse` hook activity is observed on a `Read`
 - `SessionStart` is best-effort in non-interactive mode (`-p`) and may show as warning
-- `PostToolUse` is reported as configured/skipped unless explicitly exercised with write/edit flow
+- if `PostToolUse` is configured (for example via auto-format), it is reported as configured/skipped unless explicitly exercised with write/edit flow
 - `Read` hook does not mutate the original test file
 - file-guard blocks traversal-style command attempts
 
@@ -53,7 +53,7 @@ Prerequisites: `claude` CLI authenticated, runtime hooks installed in `~/.claude
 
 - schema presence
 - env object presence
-- PreToolUse and SessionStart hooks configured (PostToolUse removed - no benefit)
+- PreToolUse and SessionStart hooks configured by default (`PostToolUse` is only added when auto-format is enabled)
 - permissions deny list configured
 - profile-specific tuning keys
 - privacy-specific keys

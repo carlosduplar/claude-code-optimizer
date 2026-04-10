@@ -48,6 +48,10 @@ function Write-Hooks {
   }
 
   New-Item -ItemType Directory -Force -Path $HooksDir | Out-Null
+  Remove-Item -LiteralPath (Join-Path $HooksDir 'posttooluse.ps1') -ErrorAction SilentlyContinue
+  if (-not $AutoFormat) {
+    Remove-Item -LiteralPath (Join-Path $HooksDir 'post-edit-format.ps1') -ErrorAction SilentlyContinue
+  }
 
   # Copy external hooks from script directory
   $ScriptHooksDir = Join-Path $PSScriptRoot 'hooks'
@@ -399,6 +403,98 @@ exit 0
   Write-Ok 'Hook scripts updated'
 }
 
+function Get-DefaultAllowPatterns {
+  return @(
+    'Bash(ls *)','Bash(ll *)','Bash(dir *)',
+    'Bash(Get-ChildItem *)','Bash(gci *)',
+    'Bash(pwd)','Bash(Get-Location)','Bash(gl)',
+    'Bash(which *)','Bash(where *)','Bash(Get-Command *)','Bash(gcm *)',
+    'Bash(git status*)','Bash(git log*)','Bash(git diff*)','Bash(git branch*)','Bash(git stash list*)','Bash(git remote*)','Bash(git config*)',
+    'Bash(npm list*)','Bash(pip list*)','Bash(pip show*)','Bash(pip freeze*)','Bash(Get-Package*)',
+    'Bash(*--version)','Bash(* -v)','Bash(*--help*)'
+  )
+}
+
+function Get-UnsafeAllowPatterns {
+  return @(
+    'Bash(find *)','Bash(grep *)','Bash(rg *)',
+    'Bash(cat *)','Bash(head *)','Bash(tail *)','Bash(wc *)','Bash(sort *)',
+    'Bash(uniq *)','Bash(git show*)','Bash(npm run*)'
+  )
+}
+
+function Get-LegacyManagedAllowPatterns {
+  return @(
+    'Bash(find . -*)',
+    'Bash(echo *)','Bash(printenv *)','Bash(env | *)',
+    'Bash(ps *)','Bash(top -n *)','Bash(htop -n *)',
+    'Bash(curl -I *)','Bash(curl --head *)','Bash(ping -c *)','Bash(nslookup *)','Bash(dig *)',
+    'Bash(mkdir *)','Bash(rmdir *)','Bash(touch *)','Bash(mv *)','Bash(cp *)',
+    'Bash(make *)','Bash(cmake *)','Bash(npm run *)','Bash(yarn *)','Bash(pnpm *)',
+    'Bash(tsc *)','Bash(eslint *)','Bash(prettier *)','Bash(ruff *)','Bash(black *)',
+    'Bash(docker ps *)','Bash(docker images *)','Bash(docker-compose ps *)'
+  )
+}
+
+function Get-ManagedEnvKeys {
+  return @(
+    'DISABLE_TELEMETRY',
+    'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+    'BASH_MAX_OUTPUT_LENGTH',
+    'CLAUDE_CODE_AUTO_COMPACT_WINDOW',
+    'CLAUDE_AUTOCOMPACT_PCT_OVERRIDE',
+    'CLAUDE_CODE_DISABLE_AUTO_MEMORY',
+    'ENABLE_CLAUDE_CODE_SM_COMPACT',
+    'DISABLE_INTERLEAVED_THINKING',
+    'CLAUDE_CODE_DISABLE_ADVISOR_TOOL',
+    'CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS',
+    'CLAUDE_CODE_DISABLE_POLICY_SKILLS',
+    'OTEL_LOG_USER_PROMPTS',
+    'OTEL_LOG_TOOL_DETAILS',
+    'MAX_MCP_OUTPUT_TOKENS',
+    'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS'
+  )
+}
+
+function Get-ManagedDenyPatterns {
+  return @(
+    'Read(./.env)',
+    'Read(./.env.*)',
+    'Read(./secrets/**)',
+    'Edit(./.env)',
+    'Edit(./.env.*)',
+    'Edit(./secrets/**)'
+  )
+}
+
+function Get-ManagedHookKeys {
+  return @('PreToolUse','SessionStart','PostToolUse','PostToolUseFailure','Notification')
+}
+
+function Get-HashtableOrEmpty([object]$Value) {
+  if ($Value -is [hashtable]) {
+    return $Value
+  }
+
+  return @{}
+}
+
+function Get-ArrayOrEmpty([object]$Value) {
+  if ($Value -is [array]) {
+    return $Value
+  }
+
+  return @()
+}
+
+function Get-UniqueStringArray([object[]]$Values) {
+  return @(
+    $Values |
+      Where-Object { $_ -is [string] -and -not [string]::IsNullOrWhiteSpace($_) } |
+      Select-Object -Unique
+  )
+}
+
 function Get-RenderedSettings {
   $envVars = @{
     DISABLE_TELEMETRY = '1'
@@ -429,31 +525,8 @@ function Get-RenderedSettings {
     attribution = @{ commit = ''; pr = '' }
     env = $envVars
     permissions = @{
-      allow = @(
-        'Bash(ls *)','Bash(ll *)','Bash(dir *)',
-        'Bash(Get-ChildItem *)','Bash(gci *)',
-        'Bash(pwd)','Bash(Get-Location)','Bash(gl)',
-        'Bash(which *)','Bash(where *)','Bash(Get-Command *)','Bash(gcm *)',
-        'Bash(git status*)','Bash(git log*)','Bash(git diff*)','Bash(git branch*)','Bash(git stash list*)','Bash(git remote*)','Bash(git config*)',
-        'Bash(npm list*)','Bash(pip list*)','Bash(pip show*)','Bash(pip freeze*)','Bash(Get-Package*)',
-        'Bash(grep *)','Bash(rg *)','Bash(find . -*)',
-        'Bash(echo *)','Bash(printenv *)','Bash(env | *)',
-        'Bash(ps *)','Bash(top -n *)','Bash(htop -n *)',
-        'Bash(curl -I *)','Bash(curl --head *)','Bash(ping -c *)','Bash(nslookup *)','Bash(dig *)',
-        'Bash(mkdir *)','Bash(rmdir *)','Bash(touch *)','Bash(mv *)','Bash(cp *)',
-        'Bash(*--version)','Bash(* -v)','Bash(*--help*)',
-        'Bash(make *)','Bash(cmake *)','Bash(npm run *)','Bash(yarn *)','Bash(pnpm *)',
-        'Bash(tsc *)','Bash(eslint *)','Bash(prettier *)','Bash(ruff *)','Bash(black *)',
-        'Bash(docker ps *)','Bash(docker images *)','Bash(docker-compose ps *)'
-      )
-      deny = @(
-        'Read(./.env)',
-        'Read(./.env.*)',
-        'Read(./secrets/**)',
-        'Edit(./.env)',
-        'Edit(./.env.*)',
-        'Edit(./secrets/**)'
-      )
+      allow = @(Get-DefaultAllowPatterns)
+      deny = @(Get-ManagedDenyPatterns)
     }
     hooks = @{
       PreToolUse = @(
@@ -502,31 +575,83 @@ function Get-RenderedSettings {
   }
 
   if ($UnsafeAutoApprove) {
-    $settings.permissions.allow += @(
-      'Bash(find *)','Bash(grep *)','Bash(rg *)',
-      'Bash(cat *)','Bash(head *)','Bash(tail *)','Bash(wc *)','Bash(sort *)',
-      'Bash(uniq *)','Bash(echo *)',
-      'Bash(git show*)','Bash(git remote*)','Bash(git stash list*)','Bash(git config*)',
-      'Bash(npm run*)'
-    )
+    $settings.permissions.allow += @(Get-UnsafeAllowPatterns)
     $settings.permissions.allow = @($settings.permissions.allow | Select-Object -Unique)
   }
 
   return $settings
 }
 
-function Merge-Hashtable([hashtable]$Base, [hashtable]$Incoming) {
+function Merge-Settings([hashtable]$Existing, [hashtable]$Rendered) {
   $merged = @{}
-  foreach ($k in $Base.Keys) { $merged[$k] = $Base[$k] }
-  foreach ($k in $Incoming.Keys) {
-    if ($merged.ContainsKey($k) -and $merged[$k] -is [hashtable] -and $Incoming[$k] -is [hashtable]) {
-      $merged[$k] = Merge-Hashtable -Base $merged[$k] -Incoming $Incoming[$k]
-    } elseif ($merged.ContainsKey($k) -and $merged[$k] -is [array] -and $Incoming[$k] -is [array]) {
-      $merged[$k] = @($merged[$k]) + @($Incoming[$k]) | Select-Object -Unique
-    } else {
-      $merged[$k] = $Incoming[$k]
+  foreach ($key in $Existing.Keys) {
+    $merged[$key] = $Existing[$key]
+  }
+
+  foreach ($key in $Rendered.Keys) {
+    switch ($key) {
+      'env' {
+        $existingEnv = Get-HashtableOrEmpty $Existing['env']
+        $managedEnvKeys = Get-ManagedEnvKeys
+        $envMap = @{}
+        foreach ($envKey in $existingEnv.Keys) {
+          if ($envKey -notin $managedEnvKeys) {
+            $envMap[$envKey] = $existingEnv[$envKey]
+          }
+        }
+        foreach ($envKey in $Rendered['env'].Keys) {
+          $envMap[$envKey] = $Rendered['env'][$envKey]
+        }
+        $merged['env'] = $envMap
+      }
+      'permissions' {
+        $existingPermissions = Get-HashtableOrEmpty $Existing['permissions']
+        $permissions = @{}
+        foreach ($permKey in $existingPermissions.Keys) {
+          if ($permKey -notin @('allow','deny')) {
+            $permissions[$permKey] = $existingPermissions[$permKey]
+          }
+        }
+
+        $managedAllowPatterns = Get-UniqueStringArray (@(Get-ArrayOrEmpty $Rendered['permissions']['allow']) + @(Get-UnsafeAllowPatterns) + @(Get-LegacyManagedAllowPatterns))
+        $preservedAllow = @()
+        foreach ($entry in (Get-ArrayOrEmpty $existingPermissions['allow'])) {
+          if (($entry -is [string]) -and ($entry -notin $managedAllowPatterns)) {
+            $preservedAllow += $entry
+          }
+        }
+        $permissions['allow'] = Get-UniqueStringArray (@($preservedAllow) + @(Get-ArrayOrEmpty $Rendered['permissions']['allow']))
+
+        $managedDenyPatterns = Get-ManagedDenyPatterns
+        $preservedDeny = @()
+        foreach ($entry in (Get-ArrayOrEmpty $existingPermissions['deny'])) {
+          if (($entry -is [string]) -and ($entry -notin $managedDenyPatterns)) {
+            $preservedDeny += $entry
+          }
+        }
+        $permissions['deny'] = Get-UniqueStringArray (@($preservedDeny) + @(Get-ArrayOrEmpty $Rendered['permissions']['deny']))
+        $merged['permissions'] = $permissions
+      }
+      'hooks' {
+        $existingHooks = Get-HashtableOrEmpty $Existing['hooks']
+        $hooks = @{}
+        $managedHookKeys = Get-ManagedHookKeys
+        foreach ($hookKey in $existingHooks.Keys) {
+          if ($hookKey -notin $managedHookKeys) {
+            $hooks[$hookKey] = $existingHooks[$hookKey]
+          }
+        }
+        foreach ($hookKey in $Rendered['hooks'].Keys) {
+          $hooks[$hookKey] = $Rendered['hooks'][$hookKey]
+        }
+        $merged['hooks'] = $hooks
+      }
+      default {
+        $merged[$key] = $Rendered[$key]
+      }
     }
   }
+
   return $merged
 }
 
@@ -542,7 +667,7 @@ function Write-Settings {
 
   if (Test-Path -LiteralPath $SettingsFile) {
     $existing = Get-Content -LiteralPath $SettingsFile -Raw | ConvertFrom-Json -AsHashtable
-    $merged = Merge-Hashtable -Base $existing -Incoming $rendered
+    $merged = Merge-Settings -Existing $existing -Rendered $rendered
     $merged | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $SettingsFile -Encoding utf8
   } else {
     $rendered | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $SettingsFile -Encoding utf8

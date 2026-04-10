@@ -58,7 +58,7 @@ out = {
   "pretooluse_command": json.dumps(s.get("hooks", {}).get("PreToolUse", [])),
 }
 allow = s.get("permissions", {}).get("allow", []) if isinstance(s.get("permissions", {}).get("allow", []), list) else []
-unsafe_markers = ["Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(find *)", "Bash(grep *)", "Bash(rg *)", "Bash(git show*)", "Bash(git remote*)", "Bash(git config*)", "Bash(npm run*)"]
+unsafe_markers = ["Bash(cat *)", "Bash(head *)", "Bash(tail *)", "Bash(find *)", "Bash(grep *)", "Bash(rg *)", "Bash(wc *)", "Bash(sort *)", "Bash(uniq *)", "Bash(git show*)", "Bash(npm run*)"]
 out["unsafe_patterns_present"] = any(m in allow for m in unsafe_markers)
 print(json.dumps(out))
 PY
@@ -110,8 +110,8 @@ if $EXPECT_UNSAFE_SET; then
 else
   info "unsafe_patterns_present=$(python3 - <<PY
 import json
-d=json.load(open(r\"$TMP_REPORT\",\"r\",encoding=\"utf-8\"))
-print(str(d.get(\"unsafe_patterns_present\")).lower())
+d=json.load(open(r"$TMP_REPORT","r",encoding="utf-8"))
+print(str(d.get("unsafe_patterns_present")).lower())
 PY
 ) (not enforced; pass --expect-unsafe to enforce)"
 fi

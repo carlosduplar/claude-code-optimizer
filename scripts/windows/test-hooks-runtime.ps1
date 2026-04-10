@@ -39,7 +39,7 @@ $tmp1 = Join-Path $env:TEMP ("claude-hooks-read-{0}.jsonl" -f $PID)
 $tmp2 = Join-Path $env:TEMP ("claude-hooks-bash-{0}.jsonl" -f $PID)
 
 try {
-  Info 'Test 1/3: SessionStart + PreToolUse + PostToolUse events on Read'
+  Info 'Test 1/3: SessionStart + PreToolUse events on Read'
   $readOutput = "Read $TestImage" | claude -p --verbose --include-hook-events --output-format stream-json --allowedTools Read 2>&1
   $readOutput | Set-Content -LiteralPath $tmp1
 

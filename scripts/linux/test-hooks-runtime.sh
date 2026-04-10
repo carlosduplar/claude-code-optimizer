@@ -37,7 +37,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-info "Test 1/3: SessionStart + PreToolUse + PostToolUse events on Read"
+info "Test 1/3: SessionStart + PreToolUse events on Read"
 echo "Read $TEST_IMAGE" | claude -p \
   --verbose \
   --include-hook-events \

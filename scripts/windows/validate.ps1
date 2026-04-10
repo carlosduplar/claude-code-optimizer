@@ -62,7 +62,7 @@ if ($PSBoundParameters.ContainsKey('Profile')) {
 $allowPresent = $permissions.ContainsKey('allow') -and $permissions['allow'].Count -gt 0
 Check 'allow_present' $allowPresent
 
-$unsafeMarkers = @('Bash(cat *)','Bash(head *)','Bash(tail *)','Bash(find *)','Bash(grep *)','Bash(rg *)','Bash(git show*)','Bash(git remote*)','Bash(git config*)','Bash(npm run*)')
+$unsafeMarkers = @('Bash(cat *)','Bash(head *)','Bash(tail *)','Bash(find *)','Bash(grep *)','Bash(rg *)','Bash(wc *)','Bash(sort *)','Bash(uniq *)','Bash(git show*)','Bash(npm run*)')
 $unsafePresent = $false
 if ($allowPresent) {
   foreach ($m in $unsafeMarkers) {

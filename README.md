@@ -101,6 +101,8 @@ See [CLAUDE.md](CLAUDE.md). Contains compressed behavioral anchors for communica
 
 The project no longer claims PostToolUse-hook keepalive behavior. Keepalive is reminder-based (`SessionStart`) and manual (`/loop`) by design.
 
+Default optimizer runs do not add `PostToolUse`; that hook is only added when auto-format is enabled.
+
 ### Hook Runtime Verification
 
 Use runtime checks (not only config checks) to confirm hook events are firing:
