@@ -19,7 +19,7 @@ Confidence levels required on all technical claims:
 - UNKNOWN: Cannot determine, user must verify
 
 ## Workflow
-Make smallest correct change. After edits: run linter/tests if available.
+Make smallest correct change. Read target file before any edit. After edits: run linter/tests if available.
 File >500 lines: use offset+limit. Search before full read.
 
 ## Documentation

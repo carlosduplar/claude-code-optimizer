@@ -46,34 +46,37 @@ if ($toolName -eq 'Write') {
   $content = $payload.tool_input.content
 }
 
-# For Edit tool, check old/new strings
-if ($toolName -in @('Edit','MultiEdit')) {
-  $content = "$($payload.tool_input.oldString) $($payload.tool_input.newString)"
+# For Edit/MultiEdit tools, check old/new strings
+if ($toolName -eq 'Edit') {
+  $content = "$($payload.tool_input.old_string) $($payload.tool_input.new_string)"
+}
+if ($toolName -eq 'MultiEdit') {
+  $content = ($payload.tool_input.edits | ForEach-Object { "$($_.old_string) $($_.new_string)" }) -join ' '
 }
 
 if (-not $content) { exit 0 }
 
 # Secret detection patterns
 $secretPatterns = @(
-  '(?i)password\s*=\s*["'''][^"''"\n]{4,}["''']'
-  '(?i)passwd\s*=\s*["'''][^"''"\n]{4,}["''']'
-  '(?i)api[_-]?key\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)apikey\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)secret[_-]?key\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)secret\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)auth[_-]?token\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)access[_-]?token\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)token\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)private[_-]?key\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)password\s*=\s*["''][^"''"\n]{4,}["'']'
+  '(?i)passwd\s*=\s*["''][^"''"\n]{4,}["'']'
+  '(?i)api[_-]?key\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)apikey\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)secret[_-]?key\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)secret\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)auth[_-]?token\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)access[_-]?token\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)token\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)private[_-]?key\s*=\s*["''][^"''"\n]{8,}["'']'
   '-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----'
-  '(?i)aws[_-]?access[_-]?key[_-]?id\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)aws[_-]?secret[_-]?access[_-]?key\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)aws[_-]?access[_-]?key[_-]?id\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)aws[_-]?secret[_-]?access[_-]?key\s*=\s*["''][^"''"\n]{8,}["'']'
   'AKIA[0-9A-Z]{16}'
-  '(?i)github[_-]?token\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)slack[_-]?token\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)github[_-]?token\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)slack[_-]?token\s*=\s*["''][^"''"\n]{8,}["'']'
   'xox[baprs]-[0-9a-zA-Z]{10,48}'
-  '(?i)database[_-]?url\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)connection[_-]?string\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)database[_-]?url\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)connection[_-]?string\s*=\s*["''][^"''"\n]{8,}["'']'
 )
 
 foreach ($pattern in $secretPatterns) {

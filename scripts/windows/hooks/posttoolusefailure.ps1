@@ -14,7 +14,8 @@ $LOG_FILE = Join-Path $LOG_DIR "$DATE.log"
 if (Test-Path -LiteralPath $LOG_FILE) {
   $size = (Get-Item -LiteralPath $LOG_FILE).Length
   if ($size -gt 1048576) {
-    Move-Item -LiteralPath $LOG_FILE -Destination (Join-Path $LOG_DIR "$DATE-1.log") -Force
+    $ts = Get-Date -Format 'HHmmss'
+    Move-Item -LiteralPath $LOG_FILE -Destination (Join-Path $LOG_DIR "$DATE-$ts.log") -Force
   }
 }
 

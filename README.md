@@ -71,6 +71,8 @@ All optimizer-managed runtime configuration is written to `~/.claude/settings.js
 | `ENABLE_TOOL_SEARCH` | Tool search/discovery | `auto` |
 | `ENABLE_SESSION_PERSISTENCE` | Session persistence | `false` |
 | `ENABLE_CLAUDE_CODE_SM_COMPACT` | Session-memory compaction | `false` |
+| `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | Experimental multi-agent teams support | `false` (set `1` by tuned profile) |
+| `MAX_MCP_OUTPUT_TOKENS` | Maximum tokens per MCP tool response | unset (set `25000` by tuned profile) |
 
 **Feature Disable** (runtime, public builds)
 

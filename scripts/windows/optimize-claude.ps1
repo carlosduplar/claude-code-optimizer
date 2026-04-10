@@ -71,6 +71,10 @@ if (-not $filePath) { $filePath = $payload.tool_input.filePath }
 
 if ($toolName -ne 'Read' -or -not $filePath -or -not (Test-Path -LiteralPath $filePath)) { exit 0 }
 
+Get-ChildItem $env:TEMP -Filter 'claude-read-*' -ErrorAction SilentlyContinue |
+  Where-Object { $_.LastWriteTime -lt (Get-Date).AddHours(-1) } |
+  Remove-Item -Force -ErrorAction SilentlyContinue
+
 $ext = [IO.Path]::GetExtension($filePath).TrimStart('.').ToLowerInvariant()
 $base = Join-Path $env:TEMP ("claude-read-{0}-{1}" -f [DateTimeOffset]::UtcNow.ToUnixTimeSeconds(), $PID)
 
@@ -195,7 +199,39 @@ exit 0
 
   $sessionStartReminder = @'
 param()
-Write-Output 'Keepalive reminder: if you expect >5m idle periods, run /loop manually.'
+$ErrorActionPreference = 'SilentlyContinue'
+$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$source = $payload.source
+$cwd = $payload.cwd
+if ($cwd) { Set-Location -LiteralPath $cwd -ErrorAction SilentlyContinue }
+
+$parts = @("Session: $source")
+
+if (Test-Path 'package.json') {
+  $pkg = Get-Content 'package.json' -Raw | ConvertFrom-Json -ErrorAction SilentlyContinue
+  $name = if ($pkg -and $pkg.name) { $pkg.name } else { 'project' }
+  $parts += "$name (Node.js)"
+} elseif (Test-Path 'pyproject.toml') {
+  $parts += 'Python project'
+} elseif (Test-Path 'Cargo.toml') {
+  $parts += 'Rust project'
+} elseif (Test-Path 'go.mod') {
+  $parts += 'Go project'
+}
+
+$branch = git branch --show-current 2>$null
+if ($branch) {
+  $changes = (git status --short 2>$null | Measure-Object -Line).Lines
+  if ($changes -gt 0) {
+    $parts += "branch: $branch ($changes uncommitted)"
+  } else {
+    $parts += "branch: $branch"
+  }
+}
+
+$parts += 'Keepalive: if >5m idle, run /loop'
+
+@{ hookSpecificOutput = @{ hookEventName = 'SessionStart'; additionalContext = ($parts -join ' | ') } } | ConvertTo-Json -Compress
 exit 0
 '@
 
@@ -212,7 +248,8 @@ $LOG_FILE = Join-Path $LOG_DIR "$DATE.log"
 if (Test-Path -LiteralPath $LOG_FILE) {
   $size = (Get-Item -LiteralPath $LOG_FILE).Length
   if ($size -gt 1048576) {
-    Move-Item -LiteralPath $LOG_FILE -Destination (Join-Path $LOG_DIR "$DATE-1.log") -Force
+    $ts = Get-Date -Format 'HHmmss'
+    Move-Item -LiteralPath $LOG_FILE -Destination (Join-Path $LOG_DIR "$DATE-$ts.log") -Force
   }
 }
 
@@ -312,34 +349,37 @@ if ($toolName -eq 'Write') {
   $content = $payload.tool_input.content
 }
 
-# For Edit tool, check old/new strings
-if ($toolName -in @('Edit','MultiEdit')) {
-  $content = "$($payload.tool_input.oldString) $($payload.tool_input.newString)"
+# For Edit/MultiEdit tools, check old/new strings
+if ($toolName -eq 'Edit') {
+  $content = "$($payload.tool_input.old_string) $($payload.tool_input.new_string)"
+}
+if ($toolName -eq 'MultiEdit') {
+  $content = ($payload.tool_input.edits | ForEach-Object { "$($_.old_string) $($_.new_string)" }) -join ' '
 }
 
 if (-not $content) { exit 0 }
 
 # Secret detection patterns
 $secretPatterns = @(
-  '(?i)password\s*=\s*["'''][^"''"\n]{4,}["''']'
-  '(?i)passwd\s*=\s*["'''][^"''"\n]{4,}["''']'
-  '(?i)api[_-]?key\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)apikey\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)secret[_-]?key\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)secret\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)auth[_-]?token\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)access[_-]?token\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)token\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)private[_-]?key\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)password\s*=\s*["''][^"''"\n]{4,}["'']'
+  '(?i)passwd\s*=\s*["''][^"''"\n]{4,}["'']'
+  '(?i)api[_-]?key\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)apikey\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)secret[_-]?key\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)secret\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)auth[_-]?token\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)access[_-]?token\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)token\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)private[_-]?key\s*=\s*["''][^"''"\n]{8,}["'']'
   '-----BEGIN (RSA |DSA |EC |OPENSSH )?PRIVATE KEY-----'
-  '(?i)aws[_-]?access[_-]?key[_-]?id\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)aws[_-]?secret[_-]?access[_-]?key\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)aws[_-]?access[_-]?key[_-]?id\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)aws[_-]?secret[_-]?access[_-]?key\s*=\s*["''][^"''"\n]{8,}["'']'
   'AKIA[0-9A-Z]{16}'
-  '(?i)github[_-]?token\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)slack[_-]?token\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)github[_-]?token\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)slack[_-]?token\s*=\s*["''][^"''"\n]{8,}["'']'
   'xox[baprs]-[0-9a-zA-Z]{10,48}'
-  '(?i)database[_-]?url\s*=\s*["'''][^"''"\n]{8,}["''']'
-  '(?i)connection[_-]?string\s*=\s*["'''][^"''"\n]{8,}["''']'
+  '(?i)database[_-]?url\s*=\s*["''][^"''"\n]{8,}["'']'
+  '(?i)connection[_-]?string\s*=\s*["''][^"''"\n]{8,}["'']'
 )
 
 foreach ($pattern in $secretPatterns) {
@@ -355,7 +395,19 @@ exit 0
 
   $notifyHook = @'
 param()
-# Notification hook - minimal, just acknowledges
+$ErrorActionPreference = 'SilentlyContinue'
+$payload = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$msg = $payload.message
+if (-not $msg) { exit 0 }
+try {
+  $null = [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime]
+  $null = [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime]
+  $xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+  $escaped = [System.Security.SecurityElement]::Escape($msg)
+  $xml.LoadXml("<toast><visual><binding template=`"ToastText01`"><text id=`"1`">$escaped</text></binding></visual></toast>")
+  $toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
+  [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('Windows PowerShell').Show($toast)
+} catch { }
 exit 0
 '@
 
@@ -545,7 +597,7 @@ function Get-RenderedSettings {
       )
       SessionStart = @(
         @{
-          matcher = 'startup|resume'
+          matcher = 'startup|resume|compact'
           hooks = @(@{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\session-start-reminder.ps1'')'; timeout = 5 })
         }
       )
