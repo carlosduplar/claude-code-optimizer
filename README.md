@@ -42,6 +42,8 @@ cp claude-code-optimizer/CLAUDE.md ./CLAUDE.md
 | Compact CLAUDE.md | Compressed behavioral anchors | ~45% reduction on session-start input |
 | experimentalSystemReminder | Per-turn style injection | ⚠️ unverified |
 | Telemetry blocking | Disables Datadog/BigQuery/OTLP endpoints | Reduces non-essential outbound traffic |
+| ENABLE_PROMPT_CACHING_1H | Extends prompt cache TTL from 5min to 1hr | Big cost saver on long sessions |
+| Auto-handoff hooks | PreCompact synthesizes session state; SessionStart auto-inlines | Survives compaction without losing context |
 
 *Cache savings only realized on hit; binary savings depend on file type.*
 
@@ -73,6 +75,7 @@ All optimizer-managed runtime configuration is written to `~/.claude/settings.js
 | `ENABLE_CLAUDE_CODE_SM_COMPACT` | Session-memory compaction | `false` |
 | `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | Experimental multi-agent teams support | `false` (set `1` by tuned profile) |
 | `MAX_MCP_OUTPUT_TOKENS` | Maximum tokens per MCP tool response | unset (set `25000` by tuned profile) |
+| `ENABLE_PROMPT_CACHING_1H` | Extend prompt cache TTL to 1 hour | `false` (set `1` by tuned profile) |
 
 **Feature Disable** (runtime, public builds)
 
@@ -111,6 +114,8 @@ See [CLAUDE.md](CLAUDE.md). Contains compressed behavioral anchors for communica
 | `PostToolUse` | After Write/Edit/MultiEdit | Auto-format files (prettier for JS/TS/CSS/HTML/JSON/YAML; black/autopep8 for Python) | `post-edit-format.sh/ps1` |
 | `PostToolUseFailure` | After any tool fails | Logs errors to `~/.claude/logs/errors/` with 1MB rotation | `posttoolusefailure.sh/ps1` |
 | `Notification` | When notification sent | Desktop toast (Windows) or `notify-send` (Linux); fallback to stderr | `notify.sh/ps1` |
+| `PreCompact` | Before context compaction | Synthesizes structured handoff summary from session transcript; writes `docs/handoff-context.md` | `handoff-precompact.sh/ps1` |
+| `SessionStart` (compact\|resume) | Session resume after compact | Auto-inlines previous handoff context into new session; no Read-tool round trip | `handoff-session-resume.sh/ps1` |
 
 ### Caveman Output Style
 

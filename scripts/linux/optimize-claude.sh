@@ -423,9 +423,23 @@ settings = {
     ],
     "SessionStart": [
       {
-        "matcher": "startup|resume",
+        "matcher": "startup|resume|compact",
         "hooks": [
           {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/session-start-reminder.sh", "timeout": 5}
+        ]
+      },
+      {
+        "matcher": "compact|resume",
+        "hooks": [
+          {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/handoff-session-resume.sh", "timeout": 5}
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/handoff-precompact.sh", "timeout": 60}
         ]
       }
     ],
@@ -470,6 +484,7 @@ if profile == "tuned":
       "OTEL_LOG_TOOL_DETAILS": "0",
       "MAX_MCP_OUTPUT_TOKENS": "25000",
       "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS": "1",
+      "ENABLE_PROMPT_CACHING_1H": "1",
     }
   )
 
@@ -511,6 +526,7 @@ managed_env_keys = {
     "OTEL_LOG_TOOL_DETAILS",
     "MAX_MCP_OUTPUT_TOKENS",
     "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",
+    "ENABLE_PROMPT_CACHING_1H",
 }
 legacy_managed_allow = {
     "Bash(find . -*)",
@@ -535,7 +551,7 @@ managed_deny = {
     "Edit(./.env.*)",
     "Edit(./secrets/**)",
 }
-managed_hook_keys = {"PreToolUse", "SessionStart", "PostToolUse", "PostToolUseFailure", "Notification"}
+managed_hook_keys = {"PreToolUse", "SessionStart", "PostToolUse", "PostToolUseFailure", "Notification", "PreCompact"}
 
 def unique(values):
     seen = set()

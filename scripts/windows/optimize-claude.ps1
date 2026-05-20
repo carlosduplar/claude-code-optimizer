@@ -504,7 +504,8 @@ function Get-ManagedEnvKeys {
     'OTEL_LOG_USER_PROMPTS',
     'OTEL_LOG_TOOL_DETAILS',
     'MAX_MCP_OUTPUT_TOKENS',
-    'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS'
+    'CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS',
+    'ENABLE_PROMPT_CACHING_1H'
   )
 }
 
@@ -520,7 +521,7 @@ function Get-ManagedDenyPatterns {
 }
 
 function Get-ManagedHookKeys {
-  return @('PreToolUse','SessionStart','PostToolUse','PostToolUseFailure','Notification')
+  return @('PreToolUse','SessionStart','PostToolUse','PostToolUseFailure','Notification','PreCompact')
 }
 
 function Get-HashtableOrEmpty([object]$Value) {
@@ -570,6 +571,7 @@ function Get-RenderedSettings {
     $envVars['OTEL_LOG_TOOL_DETAILS'] = '0'
     $envVars['MAX_MCP_OUTPUT_TOKENS'] = '25000'
     $envVars['CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS'] = '1'
+    $envVars['ENABLE_PROMPT_CACHING_1H'] = '1'
   }
 
   $settings = @{
@@ -599,7 +601,19 @@ function Get-RenderedSettings {
       SessionStart = @(
         @{
           matcher = 'startup|resume|compact'
-          hooks = @(@{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\session-start-reminder.ps1'')'; timeout = 5 })
+          hooks = @(
+            @{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\session-start-reminder.ps1'')'; timeout = 5 }
+          )
+        }
+        @{
+          matcher = 'compact|resume'
+          hooks = @(@{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\handoff-session-resume.ps1'')'; timeout = 5 })
+        }
+      )
+      PreCompact = @(
+        @{
+          matcher = '*'
+          hooks = @(@{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\handoff-precompact.ps1'')'; timeout = 60 })
         }
       )
       PostToolUseFailure = @(

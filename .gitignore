@@ -21,3 +21,6 @@ tests/extracted-text.txt
 .DS_Store
 Thumbs.db
 tests/benchmark/results/
+
+# Auto-handoff context (per-project, machine-local)
+docs/handoff-context.md

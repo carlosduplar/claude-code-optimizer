@@ -61,6 +61,7 @@ flowchart TB
 8. [Storage Systems](#storage-systems)
 9. [Security: Path Traversal Protection](#security-path-traversal-protection)
 10. [Undocumented Configuration](#undocumented-configuration)
+11. [Auto-Handoff System](#auto-handoff-system)
 
 ---
 
@@ -633,6 +634,7 @@ This enables `/rewind` to restore previous file states.
 | `DISABLE_AUTO_COMPACT` | false | Disable only auto-compact |
 | `CLAUDE_CODE_BLOCKING_LIMIT_OVERRIDE` | - | Hard token limit |
 | `CLAUDE_CONTEXT_COLLAPSE` | - | Enable context collapse (ant-only) |
+| `ENABLE_PROMPT_CACHING_1H` | false | Extend prompt cache TTL from 5min to 1hr |
 
 ### Feature Flags
 
@@ -681,6 +683,87 @@ Claude Code's context management is a sophisticated multi-layer system:
 **Security** is enforced via double-pass path validation with symlink resolution.
 
 **Storage** spans 4 systems: session memory, project memory, history, and transcripts—with file checkpoints for rollback.
+
+---
+
+## Auto-Handoff System
+
+**Purpose:** Preserve session state across compaction so long sessions never lose context. Without handoff, compaction summarizes away in-flight work and the next turn often re-explores files already read.
+
+**Mechanism:** Two hooks + one per-project file:
+
+```mermaid
+sequenceDiagram
+    participant Session as Claude Session
+    participant PreCompact as PreCompact Hook
+    participant ClaudeP as claude -p --bare
+    participant File as docs/handoff-context.md
+    participant NextSession as Next Session
+
+    Session->>PreCompact: Context approaching compact threshold
+    PreCompact->>ClaudeP: Send last 50KB of transcript with JSON schema prompt
+    ClaudeP-->>PreCompact: Structured handoff summary
+    PreCompact->>File: Write docs/handoff-context.md
+    Note over Session: Compaction runs, context summarized
+
+    Note over NextSession: New session starts (compact|resume)
+    NextSession->>File: SessionStart hook reads handoff-context.md
+    File-->>NextSession: Emits additionalContext with handoff content
+    Note over NextSession: Session resumes with full state
+```
+
+### PreCompact Hook (`handoff-precompact.sh/ps1`)
+
+**Trigger:** Before every compaction event.
+
+**What it does:**
+1. Reads the session transcript path and cwd from stdin JSON
+2. Extracts the last 50KB of the transcript
+3. Spawns `claude -p --bare --model claude-sonnet-4-6` with a strict JSON schema prompt
+4. Writes the structured summary to `docs/handoff-context.md`
+5. Always exits 0 so compact proceeds regardless of outcome
+
+**Fallback:** If `claude -p` fails or times out (60s), writes a `HANDOFF_AUTO_PARTIAL` marker with the raw transcript tail.
+
+**Why `--bare`:** Skips auto-discovery of hooks, skills, plugins, MCP servers, auto memory, and CLAUDE.md. The child session only has Bash + file read/edit. Prevents nested hook cascade and CLAUDE.md re-load. Critical for a hook subprocess.
+
+**Why Sonnet 4.6 not Haiku:** Handoff is high-stakes — if next-session quality regresses, the whole point is lost. Sonnet captures nuance on constraints/ruled-out approaches; Haiku tends to flatten them. Compact fires once per long session, so the cost is rounding error.
+
+**Timeout:** 60 seconds (in seconds, not milliseconds — a common gotcha).
+
+### SessionStart Hook (`handoff-session-resume.sh/ps1`)
+
+**Trigger:** Session start matching `compact|resume`.
+
+**What it does:**
+1. Checks if `docs/handoff-context.md` exists in the project directory
+2. If found, emits `hookSpecificOutput` with the file content as `additionalContext`
+3. No Read-tool round trip needed — content is inlined directly into the new session's context
+
+### Handoff Schema
+
+The generated `docs/handoff-context.md` contains these sections:
+
+| Section | Purpose |
+|---------|---------|
+| Session Started | ISO 8601 timestamp |
+| Task | One-sentence overall goal |
+| Completed Tasks | Bullet list of concrete things finished |
+| Current State | In-flight work, files modified, what works/broken |
+| Constraints | User rules verbatim, ruled-out approaches + why |
+| Files Touched | Table: path, status, summary |
+| Issues Discovered | Bugs/gotchas + workarounds |
+| Open Questions | Unresolved decisions |
+| Next Steps | Ordered list; `next_steps[0]` = literally first action |
+| Resume Prompt | One paragraph to paste into a fresh session |
+
+### Configuration
+
+**Pairs with `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=50`:** By triggering compact at 50% (instead of the default ~95%), the PreCompact hook always has plenty of headroom. At 95% you'd be cutting it fine. The tuned profile sets this to `80` by default — lower to `50` for aggressive handoff behavior.
+
+**File location:** `docs/handoff-context.md` is per-project and gitignored by default. It persists on disk between sessions but is not committed to version control.
+
+**Manual trigger:** Run `/handoff` anytime to create a checkpoint (requires a slash command definition in `~/.claude/commands/handoff.md`).
 
 ---
 
