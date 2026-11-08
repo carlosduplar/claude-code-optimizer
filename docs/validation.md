@@ -1,6 +1,6 @@
-# Validation
+# Validation v1.0.0
 
-Validation now checks only `~/.claude/settings.json`.
+Validation checks only `~/.claude/settings.json`. `PostToolUse` is opt-in (`--auto-format`, off by default).
 
 ## Run
 

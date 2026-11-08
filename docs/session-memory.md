@@ -1,5 +1,7 @@
 # Claude Code Session Memory and Context Management
 
+> Last verified: 2026-11-08. Auto-compact window is now configurable (`CLAUDE_CODE_AUTO_COMPACT_WINDOW` 100k-1M); 13K/187K numbers below assumed a 200K window and are outdated. `CACHED_MICROCOMPACT` is ant-only / reference-only. Tuned profile sets `CLAUDE_CODE_AUTO_COMPACT_WINDOW=180000` + `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80`.
+
 ## TL;DR
 
 **What this document covers:** The complete internal architecture of how Claude Code manages conversation context, prevents token limit overflows, and preserves important information across sessions. This includes undocumented compaction strategies, hidden memory systems, and obscure cache-preservation mechanisms.
@@ -759,9 +761,11 @@ The generated `docs/handoff-context.md` contains these sections:
 
 ### Configuration
 
-**Pairs with `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=50`:** By triggering compact at 50% (instead of the default ~95%), the PreCompact hook always has plenty of headroom. At 95% you'd be cutting it fine. The tuned profile sets this to `80` by default — lower to `50` for aggressive handoff behavior.
+**Pairs with `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80` (tuned default):** By triggering compact at 80% of the auto-compact window, the PreCompact hook has headroom. Lower to `50` for aggressive handoff behavior. Note the variable only lowers the threshold; values above default are ignored.
 
-**File location:** `docs/handoff-context.md` is per-project and gitignored by default. It persists on disk between sessions but is not committed to version control.
+**Handoff model:** hooks use `claude -p --bare --model sonnet` (alias, not pinned version). `--bare` is undocumented and may break on future CLI — hook always exits 0 so compact proceeds regardless.
+
+**File location:** `docs/handoff-context.md` is per-project. Add to `.gitignore` if you do not want it committed (optimizer does not gitignore it automatically).
 
 **Manual trigger:** Run `/handoff` anytime to create a checkpoint (requires a slash command definition in `~/.claude/commands/handoff.md`).
 
@@ -769,9 +773,9 @@ The generated `docs/handoff-context.md` contains these sections:
 
 ## MCP Token Limits
 
-**Variable:** `MAX_MCP_OUTPUT_TOKENS`
+**Variable:** `MAX_MCP_OUTPUT_TOKENS` (⚠️ unverified in public builds)
 **Default:** No limit (unbounded)
-**Recommended:** `25000` (set by optimizer `tuned` profile)
+**Recommended:** `25000` (set by optimizer `tuned` profile for compat)
 
 ### Purpose
 Prevents large MCP (Model Context Protocol) server responses from saturating the context window. While CLI tools are generally preferred over MCP for efficiency (CLI output can be truncated/managed), some workflows require MCP. This limit caps MCP output to protect context space.

@@ -1,6 +1,6 @@
 # experimentalSystemReminder
 
-**Status:** Unverified in public builds — may be dead-code eliminated.
+**Status: Do not use — unverified in public builds, may be dead-code eliminated. Optimizer does not install it. Prefer output styles (system-prompt level, always-on) + hooks (must-happen guarantees).**
 
 ---
 
