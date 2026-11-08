@@ -38,7 +38,7 @@ if [[ -z "$transcript_path" || ! -f "$transcript_path" ]]; then
   exit 0
 fi
 
-tail_text="$(tail -c "$fallback_maxBytes" "$transcript_path" 2>/dev/null || tail -c 50000 "$transcript_path" 2>/dev/null || true)"
+tail_text="$(tail -c "$fallback_max_bytes" "$transcript_path" 2>/dev/null || tail -c 50000 "$transcript_path" 2>/dev/null || true)"
 
 prompt="You are synthesizing a handoff context summary from a Claude Code session transcript.
 Extract the following information as a structured Markdown document.
@@ -83,7 +83,7 @@ export CLAUDE_CODE_DISABLE_AUTO_MEMORY=1
 export CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1
 export CLAUDE_CODE_DISABLE_POLICY_SKILLS=1
 
-result="$(timeout "$timeout_seconds" claude -p --bare --model claude-sonnet-4-6 "$prompt" 2>/dev/null || true)"
+result="$(timeout "$timeout_seconds" claude -p --bare --model sonnet "$prompt" 2>/dev/null || true)"
 
 if [[ -n "$result" && "${#result}" -gt 10 ]]; then
   write_handoff "$result"

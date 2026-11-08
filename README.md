@@ -1,6 +1,8 @@
-# claude-code-optimizer
+# claude-code-optimizer v1.0.0
 
-Scripts, CLAUDE.md template, and env vars to cut Claude Code token usage and cost. Backed by reverse-engineered internals docs.
+Scripts, CLAUDE.md template, and env vars to cut Claude Code token usage and cost. Official-docs-aligned baseline + tuned overlay. Reverse-engineered internals are marked unverified.
+
+> Version: see `VERSION`. Source of truth for voice: https://github.com/carlosduplar/caveman-output-style-claude-code (synced v1.2.0).
 
 ## Quickstart
 
@@ -29,7 +31,7 @@ cp claude-code-optimizer/CLAUDE.md ./CLAUDE.md
 | Profile | Purpose |
 |---------|---------|
 | `official` | Official-docs-aligned baseline defaults |
-| `tuned` | Adds BASH_MAX_OUTPUT_LENGTH, SM_COMPACT, AUTOCOMPACT_PCT_OVERRIDE=80; disables auto-memory, advisor, git instructions, policy skills |
+| `tuned` | Adds BASH_MAX_OUTPUT_LENGTH, promptCacheTtl=1h, AUTOCOMPACT_PCT_OVERRIDE=80; disables auto-memory; sets legacy compat flags (SM_COMPACT, advisor, git instructions, policy skills — unverified in public builds, see below) |
 
 `tuned` is the default profile.
 
@@ -37,15 +39,15 @@ cp claude-code-optimizer/CLAUDE.md ./CLAUDE.md
 
 | Technique | Mechanism | Measured Impact |
 |-----------|-----------|-----------------|
-| CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80 | Proactive context compaction before 13K-token buffer | Reduces reactive compactions |
-| Binary preprocessing | markitdown conversion before API call | 50-80% token reduction on binary files |
-| Compact CLAUDE.md | Compressed behavioral anchors | ~45% reduction on session-start input |
-| experimentalSystemReminder | Per-turn style injection | ⚠️ unverified |
+| CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=80 | Compact at 80% of auto-compact window (cannot raise threshold; lower values only) | Reduces reactive compactions |
+| promptCacheTtl=1h (+ ENABLE_PROMPT_CACHING_1H for older CLI) | Extend prompt cache TTL from 5min to 1hr. Subscription default is already 1h for main conversation; explicit 1h helps API-key/Bedrock | Fewer cache misses after idle |
+| Binary preprocessing | markitdown conversion before API call | Token reduction varies by file type (unmeasured) |
+| Compact CLAUDE.md | Compressed behavioral anchors | Smaller session-start input (unmeasured; ~45% claim removed — not benchmarked) |
+| Caveman output style | Always-on voice via output style (system-prompt level). Source: caveman-output-style v1.2.0 | Fewer output tokens; prose-only savings, payload verbatim |
 | Telemetry blocking | Disables Datadog/BigQuery/OTLP endpoints | Reduces non-essential outbound traffic |
-| ENABLE_PROMPT_CACHING_1H | Extends prompt cache TTL from 5min to 1hr | Big cost saver on long sessions |
 | Auto-handoff hooks | PreCompact synthesizes session state; SessionStart auto-inlines | Survives compaction without losing context |
 
-*Cache savings only realized on hit; binary savings depend on file type.*
+*Cache savings only realized on hit. Output-style savings are voice-only; code/tool calls unchanged. Percentages in older docs were illustrative, not benchmarks.*
 
 ## Configuration Reference
 
@@ -57,13 +59,16 @@ All optimizer-managed runtime configuration is written to `~/.claude/settings.js
 |------|--------|---------|
 | `--profile` | `official` or `tuned` | `tuned` |
 | `--privacy` | `standard` or `max` | `max` |
+| `--output-style` | `caveman`, `caveman-ultra`, or `none` | `caveman` |
 | `--unsafe-auto-approve` | ⚠️ enable broad Bash allowlist | off |
-| `--auto-format` | enable post-edit format hook | **on** |
+| `--auto-format` | enable post-edit format hook (opt-in, off by default) | off |
 | `--dry-run` | preview without writes | off |
 | `--skip-deps` | skip dependency checks | off |
 | `--verify` | validate current settings only | off |
 
 ### Environment Variables
+
+Canonical cache control is now `promptCacheTtl: 1h` in settings.json (v2.1.242+). `ENABLE_PROMPT_CACHING_1H=1` is kept for older CLI compatibility. `BASH_MAX_OUTPUT_LENGTH` is overridden by `bashOutputMaxChars` setting if set — optimizer sets env only.
 
 **Feature Enable** (runtime, public builds)
 
@@ -72,23 +77,25 @@ All optimizer-managed runtime configuration is written to `~/.claude/settings.js
 | `CLAUDE_CODE_ENABLE_XAA` | Extended Authorization Architecture (MCP OAuth) | `false` |
 | `ENABLE_TOOL_SEARCH` | Tool search/discovery | `auto` |
 | `ENABLE_SESSION_PERSISTENCE` | Session persistence | `false` |
-| `ENABLE_CLAUDE_CODE_SM_COMPACT` | Session-memory compaction | `false` |
-| `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | Experimental multi-agent teams support | `false` (set `1` by tuned profile) |
-| `MAX_MCP_OUTPUT_TOKENS` | Maximum tokens per MCP tool response | unset (set `25000` by tuned profile) |
-| `ENABLE_PROMPT_CACHING_1H` | Extend prompt cache TTL to 1 hour | `false` (set `1` by tuned profile) |
+| `ENABLE_CLAUDE_CODE_SM_COMPACT` | Session-memory compaction | `false` (⚠️ legacy/unverified — set `true` by tuned for compat) |
+| `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` | Experimental multi-agent teams support | `false` (⚠️ unverified — set `1` by tuned) |
+| `MAX_MCP_OUTPUT_TOKENS` | Maximum tokens per MCP tool response | unset (⚠️ unverified — set `25000` by tuned) |
+| `ENABLE_PROMPT_CACHING_1H` | Extend prompt cache TTL to 1 hour (legacy; prefer `promptCacheTtl`) | `false` (set `1` by tuned) |
 
 **Feature Disable** (runtime, public builds)
 
 | Variable | Description | Default |
 |----------|-------------|---------|
-| `CLAUDE_CODE_DISABLE_AUTO_MEMORY` | Automatic memory extraction | `false` |
-| `CLAUDE_CODE_DISABLE_ADVISOR_TOOL` | Advisor tool | `false` |
-| `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS` | Git instructions | `false` |
-| `CLAUDE_CODE_DISABLE_POLICY_SKILLS` | Policy-based skills | `false` |
-| `DISABLE_INTERLEAVED_THINKING` | Interleaved thinking | `false` |
+| `CLAUDE_CODE_DISABLE_AUTO_MEMORY` | Automatic memory extraction (`autoMemoryEnabled=false`) | `false` |
+| `CLAUDE_CODE_DISABLE_ADVISOR_TOOL` | Advisor tool | `false` (⚠️ legacy — set `true` by tuned for compat) |
+| `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS` | Git instructions (now `includeGitInstructions`) | `false` (⚠️ legacy — set `true` by tuned) |
+| `CLAUDE_CODE_DISABLE_POLICY_SKILLS` | Policy-based skills | `false` (⚠️ legacy/unverified — set `true` by tuned) |
+| `DISABLE_INTERLEAVED_THINKING` | Interleaved thinking | `false` (⚠️ legacy — set `true` by tuned) |
 | `DISABLE_PROMPT_CACHING` | All prompt caching | `false` |
 | `DISABLE_TELEMETRY` | Telemetry | `false` |
-| `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | Compact threshold (percentage) | `80` (set) |
+| `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` | Compact threshold percentage (1-100, lower only) | `80` (set by tuned) |
+
+Plus settings key `promptCacheTtl: 1h` (tuned, v2.1.242+).
 
 **Internal / Anthropic-only** (⚠️ ant-only — requires `USER_TYPE=ant`)
 
@@ -100,13 +107,13 @@ All optimizer-managed runtime configuration is written to `~/.claude/settings.js
 
 ### CLAUDE.md Template
 
-See [CLAUDE.md](CLAUDE.md). Contains compressed behavioral anchors for communication style, principles, workflow, and documentation. Copy to project root for ~45% session-start reduction.
+See [CLAUDE.md](CLAUDE.md). Contains compressed behavioral anchors for communication style, principles, workflow, and documentation. Copy to project root. For voice, prefer the caveman output style below — CLAUDE.md is a user message, output style is system-prompt level and persists without dilution.
 
 ### Implemented Hooks
 
 | Hook | Event | What It Does | Script |
 |------|-------|--------------|--------|
-| `SessionStart` | Session startup/resume | Displays keepalive reminder (`/loop` if >5m idle) + project context | `session-start-reminder.sh/ps1` |
+| `SessionStart` | Session startup | Displays keepalive reminder + project context (startup only; compact/resume handled by handoff) | `session-start-reminder.sh/ps1` |
 | `PreToolUse` (Read) | Before Read tool | Sanity check for Read operations | `pretooluse.sh/ps1` |
 | `PreToolUse` (Write/Edit/Bash) | Before write/bash | **bash-guard**: Blocks dangerous commands (sudo, rm -rf /, curl \| bash, etc.) | `bash-guard.sh/ps1` |
 | `PreToolUse` (Write/Edit/Bash) | Before write/bash | **write-guard**: Blocks commits of secrets (API keys, tokens, private keys) to non-example files | `write-guard.sh/ps1` |
@@ -119,19 +126,20 @@ See [CLAUDE.md](CLAUDE.md). Contains compressed behavioral anchors for communica
 
 ### Caveman Output Style
 
-Default communication mode installed as custom [output style](https://code.claude.com/docs/en/output-styles) at `~/.claude/output-styles/caveman.md`:
+Installed from `assets/output-styles/` (synced from [caveman-output-style-claude-code](https://github.com/carlosduplar/caveman-output-style-claude-code) v1.2.0 — do not hand-edit; update assets instead) to `~/.claude/output-styles/`:
 
-- ~75% token reduction via telegraphic speech
-- Pattern: `[thing] [action] [reason]. [next step].`
-- Causality arrows: `X → Y`
-- Abbreviations: DB=database, auth=authentication, fn=function, impl=implementation, etc.
-- Auto-reverts to normal mode for security warnings and irreversible actions
+- `caveman.md` (`name: caveman`, lowercase — value is case-sensitive, `Caveman` falls back to `Default`)
+- `caveman-ultra.md` (maximum terseness, symbols over words, prose-only abbreviations)
 
-Set via `"outputStyle": "caveman"` in settings.json. Takes effect on next session start.
+Both set `keep-coding-instructions: true` (full system prompt only; no effect on short prompt unless `CLAUDE_CODE_SIMPLE_SYSTEM_PROMPT=0`). Applies to main conversation + forks, not subagents. Changing styles invalidates prompt cache on first message after switch.
+
+Voice-only savings: prose shrinks, code/paths/errors/commands verbatim. No measured % claimed.
+
+Set via `"outputStyle": "caveman"` in settings.json (optimizer default) or `--output-style caveman-ultra|none`. Switch mid-session with `/output-style <name>` (applies next message; v2.1.251+; CLI requires v2.1.269+). Takes effect on restart if files were created mid-session.
 
 ### Keepalive
 
-Keepalive is reminder-based (`SessionStart`) and manual (`/loop`) by design.
+Keepalive is reminder-based (`SessionStart`) and manual by design. Background `claude -p` pings create separate sessions with different prefixes and do not reliably keep the main conversation cache warm. Prefer active use; after >TTL idle expect one uncached turn. See `docs/prompt-caching.md`.
 
 ### Hook Runtime Verification
 

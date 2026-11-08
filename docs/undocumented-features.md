@@ -1,5 +1,7 @@
 # Undocumented Features in Claude Code
 
+> Last verified: 2026-11-08. Based on alleged source analysis — no pinned CLI version. Treat all 88+ flags / fast-path / ant-only claims as UNVERIFIED reference-only unless reproduced on your CLI (`claude --version`). Actionable optimizer flags are those in README + installers; everything else here is not applied.
+
 ## TL;DR
 
 **What this document covers:** A comprehensive inventory of **88+ feature flags**, hidden CLI commands, undocumented environment variables, and obscure internal systems found in the Claude Code source code. These are not covered in the official documentation and many are gated behind Anthropic's internal build system.

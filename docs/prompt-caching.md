@@ -1,6 +1,8 @@
 # Prompt Caching Internals & Keepalive Strategies
 
-> **Note:** The 5-minute cache invalidation claim comes from community reports (Reddit, Discord) and has not been officially confirmed by Anthropic. However, the strategies below are sound regardless of exact TTL.
+> Last verified: 2026-11-08 against https://code.claude.com/docs/en/prompt-caching.
+> Canonical TTL controls: `promptCacheTtl` / `CLAUDE_CODE_PROMPT_CACHE_TTL` (main, v2.1.242+) and `subagentPromptCacheTtl` / `CLAUDE_CODE_SUBAGENT_PROMPT_CACHE_TTL`. `ENABLE_PROMPT_CACHING_1H=1` is fallback #5 in precedence. Subscription default is already 1h for main conversation; API-key/Bedrock default 5m.
+> Background `claude -p` pings do not reliably keep main-conversation cache warm (separate prefix/scope).
 
 ---
 

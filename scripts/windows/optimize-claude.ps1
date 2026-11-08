@@ -12,6 +12,9 @@ param(
   [ValidateSet('standard','max')]
   [string]$Privacy = 'max',
 
+  [ValidateSet('caveman','caveman-ultra','none')]
+  [string]$OutputStyle = 'caveman',
+
   [switch]$UnsafeAutoApprove,
   [switch]$AutoFormat,
   [switch]$DryRun,
@@ -562,6 +565,11 @@ function Get-RenderedSettings {
     $envVars['CLAUDE_CODE_AUTO_COMPACT_WINDOW'] = '180000'
     $envVars['CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'] = '80'
     $envVars['CLAUDE_CODE_DISABLE_AUTO_MEMORY'] = '1'
+    # Legacy / unverified in public builds - kept for compat, see README:
+    # ENABLE_CLAUDE_CODE_SM_COMPACT, DISABLE_INTERLEAVED_THINKING,
+    # CLAUDE_CODE_DISABLE_ADVISOR_TOOL, CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS,
+    # CLAUDE_CODE_DISABLE_POLICY_SKILLS, MAX_MCP_OUTPUT_TOKENS,
+    # CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS
     $envVars['ENABLE_CLAUDE_CODE_SM_COMPACT'] = 'true'
     $envVars['DISABLE_INTERLEAVED_THINKING'] = 'true'
     $envVars['CLAUDE_CODE_DISABLE_ADVISOR_TOOL'] = 'true'
@@ -571,13 +579,13 @@ function Get-RenderedSettings {
     $envVars['OTEL_LOG_TOOL_DETAILS'] = '0'
     $envVars['MAX_MCP_OUTPUT_TOKENS'] = '25000'
     $envVars['CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS'] = '1'
+    # Cache TTL: keep legacy flag for older CLI, canonical control is promptCacheTtl below.
     $envVars['ENABLE_PROMPT_CACHING_1H'] = '1'
   }
 
   $settings = @{
     '$schema' = 'https://json.schemastore.org/claude-code-settings.json'
     attribution = @{ commit = ''; pr = '' }
-    outputStyle = 'caveman'
     env = $envVars
     permissions = @{
       allow = @(Get-DefaultAllowPatterns)
@@ -600,7 +608,7 @@ function Get-RenderedSettings {
       )
       SessionStart = @(
         @{
-          matcher = 'startup|resume|compact'
+          matcher = 'startup'
           hooks = @(
             @{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\session-start-reminder.ps1'')'; timeout = 5 }
           )
@@ -639,6 +647,17 @@ function Get-RenderedSettings {
       matcher = 'Write|Edit|MultiEdit'
       hooks = @(@{ type = 'command'; shell = 'powershell'; command = '& (Join-Path $env:USERPROFILE ''.claude\hooks\post-edit-format.ps1'')'; timeout = 30 })
     }
+  }
+
+  # Cache TTL: canonical control (v2.1.242+). Legacy ENABLE_PROMPT_CACHING_1H kept in env for older CLI.
+  # Subscription default is already 1h for main conversation; explicit 1h helps API-key / Bedrock sessions.
+  if ($Profile -eq 'tuned') {
+    $settings['promptCacheTtl'] = '1h'
+  }
+
+  # Active output style. 'none' leaves any existing value untouched.
+  if ($OutputStyle -ne 'none') {
+    $settings['outputStyle'] = $OutputStyle
   }
 
   if ($UnsafeAutoApprove) {
@@ -719,55 +738,43 @@ function Merge-Settings([hashtable]$Existing, [hashtable]$Rendered) {
     }
   }
 
+  # Clean stale tuned-only top-level keys when switching to official.
+  if (-not $Rendered.ContainsKey('promptCacheTtl') -and $merged.ContainsKey('promptCacheTtl')) {
+    $merged.Remove('promptCacheTtl')
+  }
+
   return $merged
 }
 
 function Write-OutputStyle {
+  if ($OutputStyle -eq 'none') {
+    Write-Info 'Skipping output style install (--OutputStyle none)'
+    return
+  }
+
   $outputStylesDir = Join-Path $ClaudeDir 'output-styles'
-  $cavemanPath = Join-Path $outputStylesDir 'caveman.md'
+  $assetsDir = Join-Path $PSScriptRoot '..\..\assets\output-styles'
 
-  $cavemanContent = @'
----
-name: Caveman
-description: Ultra-compact communication mode with ~75% token reduction
-keep-coding-instructions: true
----
-
-# Caveman Mode
-
-No articles, filler, pleasantries, hedging, preamble, postamble, tool announce, step narrate.
-Execute first, explain only if asked. One sentence per concept.
-Pattern: [thing] [action] [reason]. [next step].
-Use arrows for causality: X → Y.
-
-## Abbreviations
-DB=database, auth=authentication, config=configuration, req=request, res=response,
-fn=function, impl=implementation, var=variable, param=parameter, init=initialize,
-err=error, dbg=debug, ctx=context, ref=reference, api=API, cli=CLI
-
-## Rules
-- Fragments OK. Short synonyms.
-- Technical terms exact. Code blocks unchanged. Errors quoted exact.
-- Git commits, PRs: normal.
-- Auto-revert to normal mode for: security warnings, irreversible actions, multi-step sequences where fragment order risks misread.
-
-## Examples
-
-User: "How do I connect to the database?"
-Response: `psql $DB_URL` → connects Postgres. Need URL? Check `.env`.
-
-User: "Fix the auth bug"
-Response: `Read auth.ts`. Missing token validation. Adding check. `Edit auth.ts:validateToken()`.
-'@
+  $files = @('caveman.md', 'caveman-ultra.md')
+  # Default installs both; active style is set via settings.json outputStyle.
+  # Source of truth: https://github.com/carlosduplar/caveman-output-style-claude-code
+  # Synced from caveman-output-style v1.2.0. Do not hand-edit installed copies.
 
   if ($DryRun) {
-    Write-Info "[dry-run] would write caveman output style to $cavemanPath"
+    Write-Info "[dry-run] would copy $($files -join ', ') to $outputStylesDir (active: $OutputStyle)"
     return
   }
 
   New-Item -ItemType Directory -Force -Path $outputStylesDir | Out-Null
-  Set-Content -LiteralPath $cavemanPath -Value $cavemanContent -Encoding utf8
-  Write-Ok "Installed caveman output style to $cavemanPath"
+  foreach ($f in $files) {
+    $src = Join-Path $assetsDir $f
+    if (Test-Path -LiteralPath $src) {
+      Copy-Item -LiteralPath $src -Destination (Join-Path $outputStylesDir $f) -Force
+      Write-Ok "Installed output style $f"
+    } else {
+      Write-Warn "Missing asset $src — skipping"
+    }
+  }
 }
 
 function Write-ClaudeMd {
@@ -848,7 +855,7 @@ try {
     Write-Warn 'Unsafe auto-approve is enabled. This broad allowlist is high-risk.'
   }
   if (-not $DryRun) { Verify-Settings }
-  Write-Ok "Done. Profile=$Profile, privacy=$Privacy, settings=$SettingsFile"
+  Write-Ok "Done. Profile=$Profile, privacy=$Privacy, outputStyle=$OutputStyle, settings=$SettingsFile"
 } catch {
   Write-Err $_
   exit 1

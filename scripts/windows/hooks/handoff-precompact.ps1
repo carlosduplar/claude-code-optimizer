@@ -80,7 +80,8 @@ $tailText
     $env:CLAUDE_CODE_DISABLE_AUTO_MEMORY = '1'
     $env:CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS = '1'
     $env:CLAUDE_CODE_DISABLE_POLICY_SKILLS = '1'
-    claude -p --bare --model claude-sonnet-4-6 $promptText 2>$null
+    # Use sonnet alias (not pinned version) so handoff survives model updates.
+    claude -p --bare --model sonnet $promptText 2>$null
   } -ArgumentList $prompt
 
   $completed = Wait-Job $job -Timeout $timeoutSeconds

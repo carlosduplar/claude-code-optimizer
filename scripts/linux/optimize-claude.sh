@@ -5,6 +5,7 @@ set -euo pipefail
 
 PROFILE="tuned"
 PRIVACY="max"
+OUTPUT_STYLE="caveman"
 UNSAFE_AUTO_APPROVE=false
 AUTO_FORMAT=false
 DRY_RUN=false
@@ -28,8 +29,9 @@ Usage: optimize-claude.sh [options]
 Options:
   --profile official|tuned   Config profile (default: tuned)
   --privacy standard|max     Privacy level (default: max)
+  --output-style caveman|caveman-ultra|none   Active output style (default: caveman)
   --unsafe-auto-approve      Enable broad Bash auto-approve allowlist
-  --auto-format              Enable post-edit formatter hook
+  --auto-format              Enable post-edit formatter hook (default: off, opt-in)
   --dry-run                  Print actions without writing files
   --skip-deps                Skip dependency checks
   --verify                   Verify current ~/.claude/settings.json only
@@ -44,6 +46,8 @@ parse_args() {
         PROFILE="$2"; shift 2 ;;
       --privacy)
         PRIVACY="$2"; shift 2 ;;
+      --output-style)
+        OUTPUT_STYLE="$2"; shift 2 ;;
       --unsafe-auto-approve)
         UNSAFE_AUTO_APPROVE=true; shift ;;
       --auto-format)
@@ -63,6 +67,7 @@ parse_args() {
 
   [[ "$PROFILE" =~ ^(official|tuned)$ ]] || { err "--profile must be official|tuned"; exit 1; }
   [[ "$PRIVACY" =~ ^(standard|max)$ ]] || { err "--privacy must be standard|max"; exit 1; }
+  [[ "$OUTPUT_STYLE" =~ ^(caveman|caveman-ultra|none)$ ]] || { err "--output-style must be caveman|caveman-ultra|none"; exit 1; }
 }
 
 check_deps() {
@@ -307,51 +312,31 @@ HOOKEOF
 }
 
 write_output_style() {
+  if [[ "$OUTPUT_STYLE" == "none" ]]; then
+    info "Skipping output style install (--output-style none)"
+    return 0
+  fi
+
   local OUTPUT_STYLES_DIR="${CLAUDE_DIR}/output-styles"
-  local CAVEMAN_PATH="${OUTPUT_STYLES_DIR}/caveman.md"
+  local ASSETS_DIR="${SCRIPT_DIR}/../../assets/output-styles"
+
+  # Source of truth: https://github.com/carlosduplar/caveman-output-style-claude-code
+  # Synced from caveman-output-style v1.2.0. Do not hand-edit installed copies.
 
   if $DRY_RUN; then
-    info "[dry-run] would write caveman output style to ${CAVEMAN_PATH}"
-    return
+    info "[dry-run] would copy caveman.md, caveman-ultra.md to ${OUTPUT_STYLES_DIR} (active: ${OUTPUT_STYLE})"
+    return 0
   fi
 
   mkdir -p "$OUTPUT_STYLES_DIR"
-
-  cat > "$CAVEMAN_PATH" <<'STYLEEOF'
----
-name: Caveman
-description: Ultra-compact communication mode with ~75% token reduction
-keep-coding-instructions: true
----
-
-# Caveman Mode
-
-No articles, filler, pleasantries, hedging, preamble, postamble, tool announce, step narrate.
-Execute first, explain only if asked. One sentence per concept.
-Pattern: [thing] [action] [reason]. [next step].
-Use arrows for causality: X → Y.
-
-## Abbreviations
-DB=database, auth=authentication, config=configuration, req=request, res=response,
-fn=function, impl=implementation, var=variable, param=parameter, init=initialize,
-err=error, dbg=debug, ctx=context, ref=reference, api=API, cli=CLI
-
-## Rules
-- Fragments OK. Short synonyms.
-- Technical terms exact. Code blocks unchanged. Errors quoted exact.
-- Git commits, PRs: normal.
-- Auto-revert to normal mode for: security warnings, irreversible actions, multi-step sequences where fragment order risks misread.
-
-## Examples
-
-User: "How do I connect to the database?"
-Response: `psql $DB_URL` → connects Postgres. Need URL? Check `.env`.
-
-User: "Fix the auth bug"
-Response: `Read auth.ts`. Missing token validation. Adding check. `Edit auth.ts:validateToken()`.
-STYLEEOF
-
-  success "Installed caveman output style to ${CAVEMAN_PATH}"
+  for f in caveman.md caveman-ultra.md; do
+    if [[ -f "${ASSETS_DIR}/${f}" ]]; then
+      cp "${ASSETS_DIR}/${f}" "${OUTPUT_STYLES_DIR}/${f}"
+      success "Installed output style ${f}"
+    else
+      warn "Missing asset ${ASSETS_DIR}/${f} — skipping"
+    fi
+  done
 }
 
 render_settings_json() {
@@ -360,6 +345,7 @@ import json, os
 
 profile = os.environ["OPT_PROFILE"]
 privacy = os.environ["OPT_PRIVACY"]
+output_style = os.environ.get("OPT_OUTPUT_STYLE", "caveman")
 unsafe = os.environ["OPT_UNSAFE"] == "1"
 auto_format = os.environ["OPT_AUTO_FORMAT"] == "1"
 hooks_dir = os.environ["OPT_HOOKS_DIR"]
@@ -383,7 +369,6 @@ unsafe_allow = [
 settings = {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "attribution": {"commit": "", "pr": ""},
-  "outputStyle": "caveman",
   "env": {},
   "permissions": {
     "allow": list(default_allow),
@@ -423,7 +408,7 @@ settings = {
     ],
     "SessionStart": [
       {
-        "matcher": "startup|resume|compact",
+        "matcher": "startup",
         "hooks": [
           {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/session-start-reminder.sh", "timeout": 5}
         ]
@@ -468,6 +453,9 @@ if privacy == "max":
   settings["env"]["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
 
 # tuned overlay
+# Note: SM_COMPACT / INTERLEAVED_THINKING / ADVISOR / GIT_INSTRUCTIONS / POLICY_SKILLS /
+# MAX_MCP_OUTPUT_TOKENS / EXPERIMENTAL_AGENT_TEAMS are legacy or unverified in public builds.
+# Kept for compat; canonical cache control is promptCacheTtl below.
 if profile == "tuned":
   settings["env"].update(
     {
@@ -487,6 +475,12 @@ if profile == "tuned":
       "ENABLE_PROMPT_CACHING_1H": "1",
     }
   )
+  # Canonical cache TTL (v2.1.242+). Subscription default is already 1h for main
+  # conversation; explicit 1h helps API-key / Bedrock sessions.
+  settings["promptCacheTtl"] = "1h"
+
+if output_style != "none":
+  settings["outputStyle"] = output_style
 
 if unsafe:
   settings.setdefault("permissions", {}).setdefault("allow", []).extend(unsafe_allow)
@@ -599,6 +593,10 @@ for key, value in incoming.items():
     if key not in {"env", "permissions", "hooks"}:
         merged[key] = value
 
+# Clean stale tuned-only top-level keys when switching to official.
+if "promptCacheTtl" not in incoming and "promptCacheTtl" in merged:
+    del merged["promptCacheTtl"]
+
 p.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
 print("merged")
 PY
@@ -649,6 +647,7 @@ main() {
 
   export OPT_PROFILE="$PROFILE"
   export OPT_PRIVACY="$PRIVACY"
+  export OPT_OUTPUT_STYLE="$OUTPUT_STYLE"
   export OPT_UNSAFE="$($UNSAFE_AUTO_APPROVE && echo 1 || echo 0)"
   export OPT_AUTO_FORMAT="$($AUTO_FORMAT && echo 1 || echo 0)"
   export OPT_HOOKS_DIR="$HOOKS_DIR"
@@ -661,7 +660,7 @@ main() {
     verify_settings
   fi
 
-  success "Done. Profile=${PROFILE}, privacy=${PRIVACY}, settings=${SETTINGS_FILE}"
+  success "Done. Profile=${PROFILE}, privacy=${PRIVACY}, outputStyle=${OUTPUT_STYLE}, settings=${SETTINGS_FILE}"
 }
 
 main "$@"
