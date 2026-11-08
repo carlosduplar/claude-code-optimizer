@@ -24,6 +24,12 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+# Normalize case: ValidateSet is case-insensitive but settings.json outputStyle is
+# case-sensitive (installed files are lowercase). Accept Caveman-Ultra etc, store lowercase.
+$Profile = $Profile.ToLowerInvariant()
+$Privacy = $Privacy.ToLowerInvariant()
+$OutputStyle = $OutputStyle.ToLowerInvariant()
+
 function Write-Info([string]$m) { Write-Host "[INFO] $m" -ForegroundColor Cyan }
 function Write-Ok([string]$m) { Write-Host "[OK] $m" -ForegroundColor Green }
 function Write-Warn([string]$m) { Write-Host "[WARN] $m" -ForegroundColor Yellow }

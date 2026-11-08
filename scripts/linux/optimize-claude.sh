@@ -65,6 +65,11 @@ parse_args() {
     esac
   done
 
+  # Normalize case: accept Caveman-Ultra etc, store lowercase (settings outputStyle is case-sensitive)
+  PROFILE="$(echo "$PROFILE" | tr '[:upper:]' '[:lower:]')"
+  PRIVACY="$(echo "$PRIVACY" | tr '[:upper:]' '[:lower:]')"
+  OUTPUT_STYLE="$(echo "$OUTPUT_STYLE" | tr '[:upper:]' '[:lower:]')"
+
   [[ "$PROFILE" =~ ^(official|tuned)$ ]] || { err "--profile must be official|tuned"; exit 1; }
   [[ "$PRIVACY" =~ ^(standard|max)$ ]] || { err "--privacy must be standard|max"; exit 1; }
   [[ "$OUTPUT_STYLE" =~ ^(caveman|caveman-ultra|none)$ ]] || { err "--output-style must be caveman|caveman-ultra|none"; exit 1; }
@@ -436,14 +441,6 @@ settings = {
         ]
       }
     ],
-    "PostToolUse": [
-      {
-        "matcher": "Write|Edit|MultiEdit",
-        "hooks": [
-          {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/post-edit-format.sh", "timeout": 30}
-        ]
-      }
-    ]
   },
 }
 
@@ -451,6 +448,18 @@ settings = {
 settings["env"]["DISABLE_TELEMETRY"] = "1"
 if privacy == "max":
   settings["env"]["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+
+# PostToolUse formatter is opt-in only (--auto-format). When off, no hook is
+# registered and write_hook_scripts removes post-edit-format.sh.
+if auto_format:
+  settings["hooks"]["PostToolUse"] = [
+    {
+      "matcher": "Write|Edit|MultiEdit",
+      "hooks": [
+        {"type": "command", "shell": "bash", "command": f"bash {hooks_dir}/post-edit-format.sh", "timeout": 30}
+      ]
+    }
+  ]
 
 # tuned overlay
 # Note: SM_COMPACT / INTERLEAVED_THINKING / ADVISOR / GIT_INSTRUCTIONS / POLICY_SKILLS /

@@ -1,4 +1,4 @@
-# claude-code-optimizer v1.0.0
+# claude-code-optimizer v1.0.1
 
 Scripts, CLAUDE.md template, and env vars to cut Claude Code token usage and cost. Official-docs-aligned baseline + tuned overlay. Reverse-engineered internals are marked unverified.
 
