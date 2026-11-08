@@ -2,6 +2,15 @@
 
 All notable changes to `claude-code-optimizer`. Version in `VERSION`.
 
+## [1.0.1] - 2026-11-08
+
+Patch for Copilot review on PR #1 (2 medium issues).
+
+### Fixed
+- Linux: gate rendered `PostToolUse` formatter hook on `auto_format` (was always emitted, pointing to missing `post-edit-format.sh` when `--auto-format` off). Matches Windows installer and opt-in docs.
+- Windows: normalize `-OutputStyle` (and `-Profile`/`-Privacy`) to lowercase before writing settings. `ValidateSet` accepts mixed case, but `outputStyle` is case-sensitive — `Caveman-Ultra` now correctly writes `caveman-ultra`.
+- Linux: normalize `--profile`/`--privacy`/`--output-style` to lowercase (accept `Caveman-Ultra`, store `caveman-ultra`).
+
 ## [1.0.0] - 2026-11-08
 
 First versioned release. Branch: `release/v1.0.0`.
